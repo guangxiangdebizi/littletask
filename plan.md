@@ -635,7 +635,7 @@ corepack pnpm dev:mobile
 
 Nginx 配置将包含：
 
-- `manbaout.com`；当前证书不包含 `www.manbaout.com`，因此不把 `www` 加入 vhost；
+- `manbaout.com` 和 `www.manbaout.com` 均由证书覆盖，`www` 永久重定向到主域名；
 - HTTP -> HTTPS 重定向；
 - Web 静态资源缓存；
 - `/api/` 反向代理到 `127.0.0.1:3100`；

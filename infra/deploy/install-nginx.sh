@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_ROOT="${APP_ROOT:-/srv/littletask}"
-source_root="${APP_ROOT}/current/infra/nginx"
+source_root="${LITTLETASK_NGINX_SOURCE_ROOT:-${APP_ROOT}/current/infra/nginx}"
 timestamp="$(date -u +'%Y%m%dT%H%M%SZ')"
 backup_root="/etc/nginx/littletask-backups/${timestamp}"
 

@@ -80,8 +80,9 @@ runs `nginx -t`, restores on validation failure, and reloads only after success.
 - proxies the existing Roundcube container at `/webmail/`;
 - does not enable HSTS until all desired subdomains and certificates are confirmed.
 
-The current certificate covers `manbaout.com`, not `www.manbaout.com`; do not add the latter to the
-vhost until its DNS and certificate are intentionally configured.
+The certificate covers both `manbaout.com` and `www.manbaout.com`. The `www` HTTPS vhost only sends
+a permanent redirect to the canonical apex domain, while both HTTP names retain the ACME challenge
+path required for unattended renewal.
 
 ## Backups and logs
 
