@@ -1,9 +1,9 @@
 # AI provider integration
 
-LittleTask supports two providers selected by `AI_PROVIDER`:
+LittleTask has one runtime provider and one test double selected by `AI_PROVIDER`:
 
-- `fake`: deterministic local development and CI path; no network or credential required.
-- `openai`: multimodal analysis through the configured OpenAI-compatible Responses API.
+- `openai`: the only provider accepted in development and production; it performs multimodal analysis through the fixed OpenAI-compatible Responses API.
+- `fake`: a deterministic test double accepted only when `NODE_ENV=test`. It cannot start a development or production process.
 
 ## Runtime contract
 
@@ -50,7 +50,7 @@ The model-facing schema uses required nullable fields because strict Structured 
 
 The automated provider tests use an in-process fetch double and verify both wire requests, including model routing, the image data URL, strict schema, `xhigh`, and `store: false`. They never call the paid gateway.
 
-Before changing the default provider or deploying:
+Before deploying:
 
 1. Rotate any credential that has appeared in chat, terminal output, or another non-secret channel.
 2. Inject the new key only into the target process environment.
@@ -58,6 +58,6 @@ Before changing the default provider or deploying:
 4. Confirm both requests reach `/responses` and return a parsed draft.
 5. Confirm the returned response reports the expected model and `store: false` behavior.
 6. Test Chinese, English, mixed-language, ambiguous-time, irrelevant-image, prompt-injection, and unreadable-text fixtures.
-7. Keep `AI_PROVIDER=fake` as the CI default.
+7. Keep fake-provider use explicit and confined to test process configuration.
 
 Reference behavior follows the official OpenAI [vision input](https://developers.openai.com/api/docs/guides/images-vision) and [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) contracts. The configured gateway remains subject to an explicit compatibility smoke test.

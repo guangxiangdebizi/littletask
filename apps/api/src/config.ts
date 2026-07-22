@@ -35,12 +35,12 @@ const environmentSchema = z
       .max(25 * 1024 * 1024)
       .default(10 * 1024 * 1024),
     IMAGE_RETENTION: z.literal('none').default('none'),
-    AI_PROVIDER: z.enum(['fake', 'openai']).default('fake'),
-    OPENAI_BASE_URL: z.url().default('https://api.hostcentral.cc'),
+    AI_PROVIDER: z.enum(['fake', 'openai']).default('openai'),
+    OPENAI_BASE_URL: z.literal('https://api.hostcentral.cc').default('https://api.hostcentral.cc'),
     OPENAI_WIRE_API: z.literal('responses').default('responses'),
     OPENAI_API_KEY: optionalSecretSchema,
-    OPENAI_MODEL: z.string().min(1).default('gpt-5.6-terra'),
-    OPENAI_REVIEW_MODEL: z.string().min(1).default('gpt-5.6-terra'),
+    OPENAI_MODEL: z.literal('gpt-5.6-terra').default('gpt-5.6-terra'),
+    OPENAI_REVIEW_MODEL: z.literal('gpt-5.6-terra').default('gpt-5.6-terra'),
     OPENAI_REASONING_EFFORT: z.literal('xhigh').default('xhigh'),
     OPENAI_STORE: disabledBooleanSchema,
     OPENAI_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(180_000),
@@ -49,6 +49,14 @@ const environmentSchema = z
     AI_NETWORK_ACCESS: z.literal('enabled').default('enabled'),
   })
   .superRefine((value, context) => {
+    if (value.NODE_ENV !== 'test' && value.AI_PROVIDER !== 'openai') {
+      context.addIssue({
+        code: 'custom',
+        message: 'The fake AI provider is restricted to NODE_ENV=test',
+        path: ['AI_PROVIDER'],
+      });
+    }
+
     if (value.AI_PROVIDER === 'openai' && !value.OPENAI_API_KEY) {
       context.addIssue({
         code: 'custom',
@@ -62,6 +70,14 @@ const environmentSchema = z
         code: 'custom',
         message: 'DATABASE_URL is required when PERSISTENCE_PROVIDER=postgres',
         path: ['DATABASE_URL'],
+      });
+    }
+
+    if (value.NODE_ENV === 'production' && value.PERSISTENCE_PROVIDER !== 'postgres') {
+      context.addIssue({
+        code: 'custom',
+        message: 'Production requires PERSISTENCE_PROVIDER=postgres',
+        path: ['PERSISTENCE_PROVIDER'],
       });
     }
   });

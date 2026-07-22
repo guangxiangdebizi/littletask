@@ -77,7 +77,7 @@ corepack pnpm dev:mobile
 
 Press `w` in Expo to open the Web acceptance build. The default API URL is `http://127.0.0.1:3100/api/v1`; override it with `EXPO_PUBLIC_API_URL` when testing on a physical device or cloud environment.
 
-The default `memory` persistence mode needs no database and drains fake-analysis jobs inside the API process. To run the durable API/worker topology, set `PERSISTENCE_PROVIDER=postgres` in `.env`, then run:
+The default `memory` persistence mode needs no database and drains real AI jobs inside the API process. It still requires a runtime `OPENAI_API_KEY`. To run the durable API/worker topology, set `PERSISTENCE_PROVIDER=postgres` in `.env`, then run:
 
 ```bash
 docker compose up -d postgres
@@ -99,7 +99,7 @@ corepack pnpm check
 
 ## AI configuration
 
-The committed configuration defaults to `AI_PROVIDER=fake`. To enable real inference, set `AI_PROVIDER=openai` and inject `OPENAI_API_KEY` at runtime. The provider sends the screenshot twice through the OpenAI-compatible Responses API: first for extraction, then for an independent evidence review. It uses `gpt-5.6-terra`, `xhigh` reasoning, Structured Outputs, original-detail vision input, and `store: false` on every request.
+Development and production are locked to `AI_PROVIDER=openai`; the fake provider is accepted only under `NODE_ENV=test`. Inject `OPENAI_API_KEY` at runtime. The provider sends the screenshot twice through the OpenAI-compatible Responses API: first for extraction, then for an independent evidence review, and later uses the same provider for evidence-constrained suggestions. It uses `gpt-5.6-terra`, `xhigh` reasoning, Structured Outputs, original-detail vision input, and `store: false` on every request.
 
 HEIC screenshots are converted to high-quality JPEG in memory before inference. In PostgreSQL mode, original screenshot bytes are retained only in the pending job and cleared after success or permanent failure; history retains only image metadata and a SHA-256 hash. See [docs/ai-provider.md](./docs/ai-provider.md) for the request contract and gateway smoke-test checklist.
 

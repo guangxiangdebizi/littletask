@@ -7,7 +7,12 @@ import { createPrismaClient, PrismaIntakeStore } from './stores/prisma-store';
 import type { AIProvider, IntakeStore } from './types';
 
 export function createAIProvider(config: AppConfig): AIProvider {
-  if (config.AI_PROVIDER === 'fake') return new FakeAIProvider();
+  if (config.AI_PROVIDER === 'fake') {
+    if (config.NODE_ENV !== 'test') {
+      throw new Error('The fake AI provider is restricted to NODE_ENV=test');
+    }
+    return new FakeAIProvider();
+  }
   if (!config.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is required when AI_PROVIDER=openai');
   }

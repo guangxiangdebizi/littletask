@@ -4,6 +4,13 @@ const root = path.resolve(__dirname, '../..');
 const productionEnvironment = {
   NODE_ENV: 'production',
   PERSISTENCE_PROVIDER: 'postgres',
+  AI_PROVIDER: 'openai',
+  OPENAI_BASE_URL: 'https://api.hostcentral.cc',
+  OPENAI_WIRE_API: 'responses',
+  OPENAI_MODEL: 'gpt-5.6-terra',
+  OPENAI_REVIEW_MODEL: 'gpt-5.6-terra',
+  OPENAI_REASONING_EFFORT: 'xhigh',
+  OPENAI_STORE: 'false',
 };
 
 module.exports = {
