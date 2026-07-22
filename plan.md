@@ -1,6 +1,6 @@
 # LittleTask 产品与交付计划
 
-> 状态：核心产品链路、安全隔离和真实 API 评测工具已完成；正在实施生产构建、EAS 和服务器部署
+> 状态：核心产品链路与 `manbaout.com` 云端环境已上线；正在完成真实 API 质量验收和 iOS Beta
 > 产品形态：iOS App；Web 仅作为本地/云端测试与演示入口
 > 核心链路：聊天截图 + 补充文字 -> 上下文理解 -> Action Cards -> 用户确认 -> 系统执行 -> 洞察与建议
 > AI 决策：通过 `https://api.hostcentral.cc` 的 OpenAI-compatible Responses API 接入 GPT-5.6 Terra
@@ -9,7 +9,7 @@
 
 - [x] 创建 GitHub 公开仓库：[`guangxiangdebizi/littletask`](https://github.com/guangxiangdebizi/littletask)。
 - [x] 初始化 TypeScript monorepo、CI、共享契约、领域状态机和安全边界。
-- [x] 完成 React Native / Expo Web 可运行验收客户端及 Fake AI 端到端链路。
+- [x] 完成 React Native / Expo Web 可运行客户端；Fake AI 仅保留在自动化测试环境。
 - [x] 完成 Fastify API、上传校验、确认门禁、幂等执行接口和历史接口。
 - [x] 接入 PostgreSQL / Prisma 持久化、可恢复异步任务队列和独立 PM2 worker。
 - [x] 实现 GPT-5.6 Terra 多模态分析、Structured Outputs、独立复核和安全错误边界。
@@ -24,7 +24,13 @@
 - [x] 完成 Node 22 隔离运行时、不可变发布、PM2、PostgreSQL、Nginx、备份和回滚配置。
 - [x] 完成公开隐私政策、OpenAPI 3.1 文档和完整脱敏 AI eval 场景集。
 - [ ] 完成 EAS 真机测试和 TestFlight。
-- [ ] 完成 `manbaout.com` Nginx / SSL / PM2 部署。
+- [x] 完成 `manbaout.com` Nginx / SSL / PM2 / PostgreSQL 部署和备份恢复演练。
+
+2026-07-22 已将 Git SHA `9f97dbdc6e91bbbb80aec26864f25be6758f8cfc` 部署到
+`https://manbaout.com`。LittleTask 使用隔离的 Node 22、低权限 API/worker、仅回环监听的
+PostgreSQL 17 和现有有效证书；原 Roundcube Webmail 保留在 `/webmail/`。公网 readiness
+返回真实 `openai` provider，OpenAPI 和隐私政策已发布，公网指标端点被拒绝。每日备份 timer
+已启用，首份备份已在隔离 PostgreSQL 容器中以 4 个迁移和一致行数完成恢复演练。
 
 当前原生执行模块已完成代码和自动化验证：三类卡片可编辑并绑定 revision；权限只在用户主动设备核对时请求；联系人消歧、日历冲突、最终确认、SQLite 防重复账本、失败重试和不确定结果恢复已接通；Web 明确使用模拟适配器；iOS JavaScript bundle 已通过。尚未把“真机写入”标记为验收通过，需在 EAS/TestFlight 构建后用测试联系人和测试日历回归。
 
@@ -34,7 +40,8 @@
 
 运行配置已经锁定真实模型：开发和生产只能使用 `openai` provider、`https://api.hostcentral.cc`、`gpt-5.6-terra`、`xhigh` 和 `store:false`；Fake provider 仅允许 `NODE_ENV=test`，不会作为最终产品或部署环境的降级路径。
 
-当前提交先建立可复现的垂直切片；后续阶段按 GitHub Roadmap Issues 逐项实现，不用占位实现冒充已接通能力。
+当前生产环境不启用 Fake provider；最终验收只通过公开鉴权 API、PostgreSQL 队列、worker 和
+真实 GPT-5.6 Terra 链路进行，不用占位实现冒充已接通能力。
 
 ## 1. 我们要做的产品
 
@@ -580,7 +587,7 @@ corepack pnpm dev:mobile
 
 ## 14. 云端部署计划
 
-> 只有在本计划确认后才会连接 `ssh medicalweb`。部署前先只读检查，不直接覆盖现有服务。
+> 已在计划确认后完成 `medicalweb` 只读审计、隔离部署和可恢复切换；未替换主机全局 Node，也未改动无关 PM2 应用。
 
 ### 14.1 目标形态
 
@@ -628,7 +635,7 @@ corepack pnpm dev:mobile
 
 Nginx 配置将包含：
 
-- `manbaout.com` 和需要时的 `www.manbaout.com`；
+- `manbaout.com`；当前证书不包含 `www.manbaout.com`，因此不把 `www` 加入 vhost；
 - HTTP -> HTTPS 重定向；
 - Web 静态资源缓存；
 - `/api/` 反向代理到 `127.0.0.1:3100`；
@@ -654,7 +661,7 @@ Nginx 配置将包含：
 - 使用合成图片执行一次 `gpt-5.6-terra` 主分析 + 复核 provider smoke test；
 - 确认请求命中 `api.hostcentral.cc`、使用 Responses API、`xhigh` 且 `store: false`；
 - 生成三类卡片中的至少两类；
-- 编辑、确认和 mock 执行；
+- 编辑、revision 确认门禁和执行结果幂等验证；不伪造 iOS 系统写入；
 - 洞察生成；
 - PM2 重启后恢复；
 - worker 中途重启后队列任务能够恢复且不重复落动作；
@@ -765,7 +772,7 @@ App Store 上架前必须准备：
 - 确认后可在 iOS 真机写联系人和日历；
 - 能结合相关联系人、日历和当前上下文生成有依据的洞察；
 - 有历史、删除和失败重试；
-- 本地 fake/real AI 环境可运行；
+- 自动化测试可使用 Fake provider，开发和生产真实 AI 环境可运行；
 - GitHub CI 可运行；
 - `manbaout.com` HTTPS 测试环境可运行；
 - 提供部署、回滚、测试和 iOS 构建文档。
@@ -794,5 +801,6 @@ App Store 上架前必须准备：
 4. 完成 iOS 联系人/日历真机执行；
 5. 补齐洞察、测试和隐私能力；
 6. 持续维护 GitHub 公开仓库；
-7. 最后连接 `medicalweb`，审计后部署到 `manbaout.com`；
-8. 生成 iOS Beta/TestFlight 构建。
+7. 已连接 `medicalweb`，审计后部署到 `manbaout.com`；
+8. 完成真实 API、私有截图和恢复验收；
+9. 生成 iOS Beta/TestFlight 构建。

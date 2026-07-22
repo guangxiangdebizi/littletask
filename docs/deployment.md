@@ -106,12 +106,14 @@ Restore only into an empty recovery database first, never directly over producti
 
 ```bash
 docker exec -i littletask-postgres sh -c \
-  'exec pg_restore --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --clean --if-exists' \
+  'exec pg_restore --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --clean --if-exists --no-owner' \
   < /srv/littletask/shared/backups/<backup>.dump
 ```
 
 Run a restore rehearsal against a disposable container and record the Git SHA, migration version,
-backup checksum, row counts, and result without copying user data into the repository.
+backup checksum, row counts, and result without copying user data into the repository. Keep
+`--no-owner` when the recovery database uses a different role name from production; otherwise the
+archive's production ownership statements make an otherwise valid recovery fail.
 
 ## Rollback
 
