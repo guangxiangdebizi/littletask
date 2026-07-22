@@ -6,6 +6,7 @@ import type {
   AnalyzeInput,
   ClaimedAnalysisJob,
   ExecutionRecordInput,
+  ExecutionRecord,
   IntakeStore,
   ModelRunRecord,
 } from '../types';
@@ -108,11 +109,16 @@ export class InMemoryIntakeStore implements IntakeStore {
     return this.#confirmations.get(idempotencyKey)?.actionId;
   }
 
-  async recordExecution(input: ExecutionRecordInput): Promise<string> {
+  async getExecution(idempotencyKey: string): Promise<ExecutionRecord | undefined> {
+    const execution = this.#executions.get(idempotencyKey);
+    return execution ? { actionId: execution.actionId, status: execution.status } : undefined;
+  }
+
+  async recordExecution(input: ExecutionRecordInput): Promise<ExecutionRecord> {
     const existing = this.#executions.get(input.idempotencyKey);
-    if (existing) return existing.actionId;
+    if (existing) return { actionId: existing.actionId, status: existing.status };
     this.#executions.set(input.idempotencyKey, structuredClone(input));
-    return input.actionId;
+    return { actionId: input.actionId, status: input.status };
   }
 
   async claimAnalysisJob(

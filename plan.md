@@ -1,6 +1,6 @@
 # LittleTask 产品与交付计划
 
-> 状态：阶段 2 持续实施中；持久化任务队列已完成，尚未进行服务器部署
+> 状态：阶段 3 代码实施完成，等待 EAS/真机验收；尚未进行服务器部署
 > 产品形态：iOS App；Web 仅作为本地/云端测试与演示入口
 > 核心链路：聊天截图 + 补充文字 -> 上下文理解 -> Action Cards -> 用户确认 -> 系统执行 -> 洞察与建议
 > AI 决策：通过 `https://api.hostcentral.cc` 的 OpenAI-compatible Responses API 接入 GPT-5.6 Terra
@@ -14,10 +14,11 @@
 - [x] 接入 PostgreSQL / Prisma 持久化、可恢复异步任务队列和独立 PM2 worker。
 - [x] 实现 GPT-5.6 Terra 多模态分析、Structured Outputs、独立复核和安全错误边界。
 - [ ] 更换已暴露的测试密钥后，完成真实网关兼容性与质量样例测试。
-- [ ] 接入 iOS Contacts / Calendar 原生执行与本地冲突、重复项检查。
-- [ ] 完成设备测试、TestFlight、`manbaout.com` Nginx / SSL / PM2 部署。
+- [x] 接入 iOS Contacts / Calendar 原生执行、本地冲突/重复项检查和 SQLite 执行账本。
+- [ ] 完成 EAS 真机测试和 TestFlight。
+- [ ] 完成 `manbaout.com` Nginx / SSL / PM2 部署。
 
-当前持久化模块已用独立 PostgreSQL 测试库验证：API/worker 重启不丢任务、崩溃租约可被新 worker 接管、确认和执行请求可幂等去重、完成或永久失败后临时截图字节会被清除。下一实施模块为 iOS Contacts / Calendar 原生执行、联系人消歧和设备端执行账本。
+当前原生执行模块已完成代码和自动化验证：三类卡片可编辑并绑定 revision；权限只在用户主动设备核对时请求；联系人消歧、日历冲突、最终确认、SQLite 防重复账本、失败重试和不确定结果恢复已接通；Web 明确使用模拟适配器；iOS JavaScript bundle 已通过。尚未把“真机写入”标记为验收通过，需在 EAS/TestFlight 构建后用测试联系人和测试日历回归。
 
 当前提交先建立可复现的垂直切片；后续阶段按 GitHub Roadmap Issues 逐项实现，不用占位实现冒充已接通能力。
 
@@ -777,6 +778,6 @@ App Store 上架前必须准备：
 3. 再接真实多模态模型，避免 UI、数据和 AI 同时不可控；
 4. 完成 iOS 联系人/日历真机执行；
 5. 补齐洞察、测试和隐私能力；
-6. 创建 GitHub 私有仓库；
+6. 持续维护 GitHub 公开仓库；
 7. 最后连接 `medicalweb`，审计后部署到 `manbaout.com`；
 8. 生成 iOS Beta/TestFlight 构建。

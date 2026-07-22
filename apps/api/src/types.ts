@@ -45,6 +45,11 @@ export interface ExecutionRecordInput {
   errorMessage?: string;
 }
 
+export interface ExecutionRecord {
+  actionId: string;
+  status: ExecutionRecordInput['status'];
+}
+
 export interface IntakeStore {
   create(intake: Intake, analysisInput: AnalyzeInput, maxAttempts: number): Promise<void>;
   get(id: string): Promise<Intake | undefined>;
@@ -55,7 +60,8 @@ export interface IntakeStore {
   setInsights(intakeId: string, insights: Insight[]): Promise<void>;
   rememberConfirmation(idempotencyKey: string, actionId: string, revision: number): Promise<string>;
   getConfirmation(idempotencyKey: string): Promise<string | undefined>;
-  recordExecution(input: ExecutionRecordInput): Promise<string>;
+  getExecution(idempotencyKey: string): Promise<ExecutionRecord | undefined>;
+  recordExecution(input: ExecutionRecordInput): Promise<ExecutionRecord>;
   claimAnalysisJob(workerId: string, staleAfterMs: number): Promise<ClaimedAnalysisJob | null>;
   completeAnalysisJob(jobId: string): Promise<void>;
   rescheduleAnalysisJob(jobId: string, delayMs: number, errorCode: string): Promise<void>;

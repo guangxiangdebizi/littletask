@@ -108,10 +108,52 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
       });
       expect(executed.statusCode).toBe(200);
     }
+
+    const retryableAction = intake.actions[1];
+    if (!retryableAction) throw new Error('Expected a retryable contact action');
+    const confirmationKey = crypto.randomUUID();
+    const failedExecutionKey = crypto.randomUUID();
+    const successfulExecutionKey = crypto.randomUUID();
+    const retryConfirmation = await apiAfterRestart.inject({
+      method: 'POST',
+      url: `/api/v1/actions/${retryableAction.id}/confirm`,
+      payload: {
+        expectedRevision: retryableAction.revision,
+        idempotencyKey: confirmationKey,
+      },
+    });
+    expect(retryConfirmation.statusCode).toBe(200);
+    const failedExecution = await apiAfterRestart.inject({
+      method: 'POST',
+      url: `/api/v1/actions/${retryableAction.id}/execution-result`,
+      payload: {
+        idempotencyKey: failedExecutionKey,
+        confirmationIdempotencyKey: confirmationKey,
+        status: 'failed',
+        errorMessage: 'CONTACT_WRITE_FAILED',
+      },
+    });
+    expect(failedExecution.json<{ status: string }>().status).toBe('failed');
+    const successfulRetry = await apiAfterRestart.inject({
+      method: 'POST',
+      url: `/api/v1/actions/${retryableAction.id}/execution-result`,
+      payload: {
+        idempotencyKey: successfulExecutionKey,
+        confirmationIdempotencyKey: confirmationKey,
+        status: 'succeeded',
+        nativeRecordRef: 'native-contact-record-1',
+      },
+    });
+    expect(successfulRetry.json<{ status: string }>().status).toBe('succeeded');
     await apiAfterRestart.close();
 
     expect(await prisma.actionConfirmation.count({ where: { idempotencyKey } })).toBe(1);
     expect(await prisma.actionExecution.count({ where: { idempotencyKey } })).toBe(1);
+    expect(
+      await prisma.actionExecution.count({
+        where: { idempotencyKey: { in: [failedExecutionKey, successfulExecutionKey] } },
+      }),
+    ).toBe(2);
     expect(await prisma.actionRevision.count({ where: { actionId: action.id } })).toBe(1);
     expect(await prisma.modelRun.count({ where: { intakeId: id } })).toBe(2);
     const finishedJob = await prisma.analysisJob.findUniqueOrThrow({ where: { intakeId: id } });

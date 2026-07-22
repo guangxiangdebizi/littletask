@@ -1,5 +1,6 @@
 import { setTimeout as wait } from 'node:timers/promises';
 
+import type { ActionCard } from '@littletask/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { buildApp } from './app';
@@ -48,14 +49,39 @@ describe('LittleTask API', () => {
     expect(analyzed.statusCode).toBe(200);
     const intake = analyzed.json<{
       status: string;
-      actions: Array<{ id: string; revision: number; status: string }>;
+      actions: ActionCard[];
     }>();
     expect(intake.status).toBe('ready');
     expect(intake.actions).toHaveLength(3);
 
-    const action = intake.actions[0];
-    expect(action).toBeDefined();
-    if (!action) throw new Error('Expected an action');
+    const initialAction = intake.actions[0];
+    expect(initialAction).toBeDefined();
+    if (!initialAction || initialAction.type !== 'create_event') {
+      throw new Error('Expected a meeting action');
+    }
+
+    const patched = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/actions/${initialAction.id}`,
+      payload: {
+        expectedRevision: initialAction.revision,
+        payload: { ...initialAction.payload, title: '与张明确认方案' },
+      },
+    });
+    expect(patched.statusCode).toBe(200);
+    const action = patched.json<ActionCard>();
+    expect(action.revision).toBe(initialAction.revision + 1);
+    expect(action.type === 'create_event' ? action.payload.title : null).toBe('与张明确认方案');
+
+    const stalePatch = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/actions/${initialAction.id}`,
+      payload: {
+        expectedRevision: initialAction.revision,
+        payload: initialAction.payload,
+      },
+    });
+    expect(stalePatch.statusCode).toBe(409);
 
     const executionBeforeConfirmation = await app.inject({
       method: 'POST',
@@ -66,6 +92,16 @@ describe('LittleTask API', () => {
       },
     });
     expect(executionBeforeConfirmation.statusCode).toBe(409);
+
+    const staleConfirmation = await app.inject({
+      method: 'POST',
+      url: `/api/v1/actions/${action.id}/confirm`,
+      payload: {
+        expectedRevision: initialAction.revision,
+        idempotencyKey: crypto.randomUUID(),
+      },
+    });
+    expect(staleConfirmation.statusCode).toBe(409);
 
     const idempotencyKey = crypto.randomUUID();
     const confirmed = await app.inject({
@@ -90,6 +126,90 @@ describe('LittleTask API', () => {
     });
     expect(insights.statusCode).toBe(200);
     expect(insights.json<{ items: unknown[] }>().items.length).toBeGreaterThan(0);
+
+    const retryableAction = intake.actions[1];
+    if (!retryableAction) throw new Error('Expected a second action');
+    const confirmationIdempotencyKey = crypto.randomUUID();
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/actions/${retryableAction.id}/confirm`,
+      payload: {
+        expectedRevision: retryableAction.revision,
+        idempotencyKey: confirmationIdempotencyKey,
+      },
+    });
+    const firstExecutionKey = crypto.randomUUID();
+    const failed = await app.inject({
+      method: 'POST',
+      url: `/api/v1/actions/${retryableAction.id}/execution-result`,
+      payload: {
+        idempotencyKey: firstExecutionKey,
+        confirmationIdempotencyKey,
+        status: 'failed',
+        errorMessage: 'DEVICE_WRITE_FAILED',
+      },
+    });
+    expect(failed.json<{ status: string }>().status).toBe('failed');
+
+    const repeatedFailureKey = crypto.randomUUID();
+    const repeatedFailure = await app.inject({
+      method: 'POST',
+      url: `/api/v1/actions/${retryableAction.id}/execution-result`,
+      payload: {
+        idempotencyKey: repeatedFailureKey,
+        confirmationIdempotencyKey,
+        status: 'failed',
+        errorMessage: 'DEVICE_WRITE_FAILED',
+      },
+    });
+    expect(repeatedFailure.json<{ status: string }>().status).toBe('failed');
+
+    const conflictingReplay = await app.inject({
+      method: 'POST',
+      url: `/api/v1/actions/${retryableAction.id}/execution-result`,
+      payload: {
+        idempotencyKey: firstExecutionKey,
+        confirmationIdempotencyKey,
+        status: 'succeeded',
+      },
+    });
+    expect(conflictingReplay.statusCode).toBe(409);
+
+    const retried = await app.inject({
+      method: 'POST',
+      url: `/api/v1/actions/${retryableAction.id}/execution-result`,
+      payload: {
+        idempotencyKey: crypto.randomUUID(),
+        confirmationIdempotencyKey,
+        status: 'succeeded',
+        nativeRecordRef: 'test-contact-1',
+      },
+    });
+    expect(retried.json<{ status: string }>().status).toBe('succeeded');
+
+    const lateFailure = await app.inject({
+      method: 'POST',
+      url: `/api/v1/actions/${retryableAction.id}/execution-result`,
+      payload: {
+        idempotencyKey: crypto.randomUUID(),
+        confirmationIdempotencyKey,
+        status: 'failed',
+        errorMessage: 'LATE_FAILURE',
+      },
+    });
+    expect(lateFailure.statusCode).toBe(409);
+
+    const replayedFailure = await app.inject({
+      method: 'POST',
+      url: `/api/v1/actions/${retryableAction.id}/execution-result`,
+      payload: {
+        idempotencyKey: repeatedFailureKey,
+        confirmationIdempotencyKey,
+        status: 'failed',
+        errorMessage: 'DEVICE_WRITE_FAILED',
+      },
+    });
+    expect(replayedFailure.json<{ status: string }>().status).toBe('succeeded');
 
     await app.close();
   });

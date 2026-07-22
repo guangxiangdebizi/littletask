@@ -13,8 +13,8 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "LittleTask uses the screenshot you select to identify actions for your review.",
-        "NSContactsUsageDescription": "LittleTask checks and updates contacts only after you review and confirm an action.",
-        "NSCalendarsFullAccessUsageDescription": "LittleTask creates calendar events only after you review and confirm an action."
+        "NSContactsUsageDescription": "LittleTask searches for relevant matches and creates or updates contacts only after you review an action.",
+        "NSCalendarsFullAccessUsageDescription": "LittleTask checks the selected time range for conflicts and creates events only after you review an action."
       }
     },
     "android": {
@@ -43,7 +43,7 @@
       [
         "expo-contacts",
         {
-          "contactsPermission": "LittleTask checks and updates contacts only after you review and confirm an action."
+          "contactsPermission": "LittleTask searches for relevant matches and creates or updates contacts only after you review an action."
         }
       ],
       [

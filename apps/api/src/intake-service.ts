@@ -199,7 +199,9 @@ export class IntakeService {
   }
 
   async reportExecution(actionId: string, request: ExecutionResultRequest): Promise<ActionCard> {
-    const confirmedActionId = await this.store.getConfirmation(request.idempotencyKey);
+    const confirmedActionId = await this.store.getConfirmation(
+      request.confirmationIdempotencyKey ?? request.idempotencyKey,
+    );
     if (confirmedActionId !== actionId) {
       throw new DomainError(
         'ACTION_NOT_CONFIRMED',
@@ -209,26 +211,56 @@ export class IntakeService {
     }
 
     const { intake, actionIndex, action } = await this.findAction(actionId);
-    const recordedActionId = await this.store.recordExecution({
-      actionId,
-      idempotencyKey: request.idempotencyKey,
-      status: request.status,
-      ...(request.nativeRecordRef === undefined
-        ? {}
-        : { nativeRecordRef: request.nativeRecordRef }),
-      ...(request.errorMessage === undefined ? {} : { errorMessage: request.errorMessage }),
-    });
-    if (recordedActionId !== actionId) {
+    const existing = await this.store.getExecution(request.idempotencyKey);
+    if (existing && (existing.actionId !== actionId || existing.status !== request.status)) {
       throw new DomainError(
         'IDEMPOTENCY_CONFLICT',
-        'Idempotency key belongs to another action execution',
+        'Idempotency key belongs to another execution result',
+        409,
+      );
+    }
+    if (action.status === 'succeeded' && request.status === 'failed') {
+      if (existing) return action;
+      throw new DomainError(
+        'ACTION_STATE_CONFLICT',
+        'Action cannot be executed in this state',
+        409,
+      );
+    }
+
+    if (action.status !== request.status) {
+      try {
+        assertActionTransition(action.status, 'executing');
+        assertActionTransition('executing', request.status);
+      } catch {
+        throw new DomainError(
+          'ACTION_STATE_CONFLICT',
+          'Action cannot be executed in this state',
+          409,
+        );
+      }
+    }
+
+    const recorded =
+      existing ??
+      (await this.store.recordExecution({
+        actionId,
+        idempotencyKey: request.idempotencyKey,
+        status: request.status,
+        ...(request.nativeRecordRef === undefined
+          ? {}
+          : { nativeRecordRef: request.nativeRecordRef }),
+        ...(request.errorMessage === undefined ? {} : { errorMessage: request.errorMessage }),
+      }));
+    if (recorded.actionId !== actionId || recorded.status !== request.status) {
+      throw new DomainError(
+        'IDEMPOTENCY_CONFLICT',
+        'Idempotency key belongs to another execution result',
         409,
       );
     }
     if (action.status === request.status) return action;
 
-    assertActionTransition(action.status, 'executing');
-    assertActionTransition('executing', request.status);
     const updated = actionCardSchema.parse({
       ...action,
       status: request.status,

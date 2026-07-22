@@ -14,6 +14,7 @@ import type {
   AnalyzeInput,
   ClaimedAnalysisJob,
   ExecutionRecordInput,
+  ExecutionRecord,
   IntakeStore,
   ModelRunRecord,
 } from '../types';
@@ -280,7 +281,15 @@ export class PrismaIntakeStore implements IntakeStore {
     return row?.actionId;
   }
 
-  async recordExecution(input: ExecutionRecordInput): Promise<string> {
+  async getExecution(idempotencyKey: string): Promise<ExecutionRecord | undefined> {
+    const row = await this.prisma.actionExecution.findUnique({
+      where: { idempotencyKey },
+      select: { actionId: true, status: true },
+    });
+    return row ?? undefined;
+  }
+
+  async recordExecution(input: ExecutionRecordInput): Promise<ExecutionRecord> {
     const nativeRecordRef = input.nativeRecordRef
       ? `sha256:${createHash('sha256').update(input.nativeRecordRef).digest('hex')}`
       : null;
@@ -298,7 +307,7 @@ export class PrismaIntakeStore implements IntakeStore {
       },
       update: { idempotencyKey: input.idempotencyKey },
     });
-    return row.actionId;
+    return { actionId: row.actionId, status: row.status };
   }
 
   async claimAnalysisJob(

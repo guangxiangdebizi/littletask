@@ -4,11 +4,11 @@ import {
   insightSchema,
   intakeSchema,
   type ActionCard,
+  type ActionPatchRequest,
   type CreateIntakeResponse,
   type Insight,
   type Intake,
 } from '@littletask/contracts';
-import * as Crypto from 'expo-crypto';
 import type { ImagePickerAsset } from 'expo-image-picker';
 import { Platform } from 'react-native';
 
@@ -105,23 +105,52 @@ export async function getHistory(): Promise<Intake[]> {
   return intakeSchema.array().parse(response.items ?? []);
 }
 
-export async function confirmAndSimulateAction(action: ActionCard): Promise<ActionCard> {
-  const idempotencyKey = Crypto.randomUUID();
-  await requestJson(`/actions/${action.id}/confirm`, {
+export async function patchAction(
+  action: ActionCard,
+  payload: ActionPatchRequest['payload'],
+): Promise<ActionCard> {
+  const body = await requestJson(`/actions/${action.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expectedRevision: action.revision, payload }),
+  });
+  return actionCardSchema.parse(body);
+}
+
+export async function confirmAction(
+  action: ActionCard,
+  idempotencyKey: string,
+): Promise<ActionCard> {
+  const body = await requestJson(`/actions/${action.id}/confirm`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ expectedRevision: action.revision, idempotencyKey }),
   });
-  const executed = await requestJson(`/actions/${action.id}/execution-result`, {
+  return actionCardSchema.parse(body);
+}
+
+export async function reportActionExecution(
+  actionId: string,
+  input: {
+    confirmationKey: string;
+    executionKey: string;
+    status: 'succeeded' | 'failed';
+    nativeRecordRef?: string;
+    errorMessage?: string;
+  },
+): Promise<ActionCard> {
+  const body = await requestJson(`/actions/${actionId}/execution-result`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      idempotencyKey,
-      status: 'succeeded',
-      nativeRecordRef: `mock:${Platform.OS}:${action.id}`,
+      idempotencyKey: input.executionKey,
+      confirmationIdempotencyKey: input.confirmationKey,
+      status: input.status,
+      ...(input.nativeRecordRef ? { nativeRecordRef: input.nativeRecordRef } : {}),
+      ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
     }),
   });
-  return actionCardSchema.parse(executed);
+  return actionCardSchema.parse(body);
 }
 
 export async function getInsights(intakeId: string): Promise<Insight[]> {

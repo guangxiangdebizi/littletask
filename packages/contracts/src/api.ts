@@ -23,6 +23,7 @@ export const actionConfirmationRequestSchema = z.object({
 
 export const executionResultRequestSchema = z.object({
   idempotencyKey: z.string().uuid(),
+  confirmationIdempotencyKey: z.string().uuid().optional(),
   status: z.enum(['succeeded', 'failed']),
   nativeRecordRef: z.string().max(300).optional(),
   errorMessage: z.string().max(500).optional(),

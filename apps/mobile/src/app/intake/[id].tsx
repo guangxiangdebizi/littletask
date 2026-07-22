@@ -1,21 +1,21 @@
 import { Feather } from '@expo/vector-icons';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, Text, View } from 'react-native';
 
 import { ActionCard } from '../../components/action-card';
 import { AnalysisProgress } from '../../components/analysis-progress';
 import { AppHeader } from '../../components/app-header';
 import { InsightRow } from '../../components/insight-row';
+import { intakeResultStyles as styles } from '../../components/intake-result-styles';
 import { PrimaryButton } from '../../components/primary-button';
 import { Screen } from '../../components/screen';
-import { ApiRequestError, confirmAndSimulateAction, getInsights, getIntake } from '../../lib/api';
-import { colors, radii, spacing } from '../../theme/tokens';
+import { ApiRequestError, getInsights, getIntake } from '../../lib/api';
+import { colors } from '../../theme/tokens';
 
 export default function IntakeResultScreen() {
   const params = useLocalSearchParams<{ id?: string | string[] }>();
   const intakeId = Array.isArray(params.id) ? params.id[0] : params.id;
-  const queryClient = useQueryClient();
   const intakeQuery = useQuery({
     queryKey: ['intake', intakeId],
     queryFn: () => getIntake(intakeId ?? ''),
@@ -26,16 +26,6 @@ export default function IntakeResultScreen() {
     },
   });
   const intake = intakeQuery.data;
-  const confirmationMutation = useMutation({
-    mutationFn: confirmAndSimulateAction,
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['intake', intakeId] }),
-        queryClient.invalidateQueries({ queryKey: ['insights', intakeId] }),
-        queryClient.invalidateQueries({ queryKey: ['history'] }),
-      ]);
-    },
-  });
   const hasExecutedAction =
     intake?.actions.some((action) => action.status === 'succeeded') ?? false;
   const insightsQuery = useQuery({
@@ -97,8 +87,6 @@ export default function IntakeResultScreen() {
     );
   }
 
-  const mutationError = confirmationMutation.error;
-
   return (
     <Screen>
       <AppHeader back />
@@ -118,7 +106,9 @@ export default function IntakeResultScreen() {
       <View style={styles.modeNotice}>
         <Feather color={colors.blue} name="tool" size={16} />
         <Text style={styles.modeNoticeText}>
-          当前验收版本使用模拟执行，不会写入真实联系人或日历。原生执行适配器将在下一阶段启用。
+          {Platform.OS === 'web'
+            ? 'Web 验收版只会明确模拟执行，不会访问或修改系统联系人与日历。'
+            : 'iOS 仅在你主动点击设备核对后请求对应权限；只有最终确认才会写入设备。'}
         </Text>
       </View>
 
@@ -145,12 +135,14 @@ export default function IntakeResultScreen() {
           intake.actions.map((action) => (
             <ActionCard
               action={action}
-              isConfirming={
-                confirmationMutation.isPending && confirmationMutation.variables?.id === action.id
-              }
               key={action.id}
-              onConfirm={(selected) => confirmationMutation.mutate(selected)}
-              simulatedExecution
+              onOpen={(selected) =>
+                router.push({
+                  pathname: '/action/[id]',
+                  params: { id: selected.id, intakeId },
+                })
+              }
+              simulatedExecution={Platform.OS === 'web'}
             />
           ))
         ) : (
@@ -163,17 +155,6 @@ export default function IntakeResultScreen() {
           </View>
         )}
       </View>
-
-      {mutationError ? (
-        <View accessibilityLiveRegion="assertive" style={styles.errorInline}>
-          <Feather color={colors.coral} name="alert-circle" size={16} />
-          <Text style={styles.errorInlineText}>
-            {mutationError instanceof ApiRequestError
-              ? mutationError.message
-              : '动作确认失败，请重试。'}
-          </Text>
-        </View>
-      ) : null}
 
       {hasExecutedAction ? (
         <View style={styles.insightsSection}>
@@ -207,172 +188,3 @@ function ErrorState({ message, onRetry }: { message: string; onRetry?: () => voi
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  topSpacing: {
-    paddingTop: spacing[8],
-  },
-  summary: {
-    gap: spacing[3],
-    paddingBottom: spacing[6],
-    paddingTop: spacing[8],
-  },
-  kicker: {
-    color: colors.pine,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  summaryTitle: {
-    color: colors.ink,
-    fontSize: 26,
-    fontWeight: '700',
-    letterSpacing: -0.7,
-    lineHeight: 34,
-  },
-  summaryMeta: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing[2],
-  },
-  summaryMetaText: {
-    color: colors.muted,
-    fontSize: 13,
-  },
-  metaDot: {
-    backgroundColor: colors.lineStrong,
-    borderRadius: 2,
-    height: 4,
-    width: 4,
-  },
-  modeNotice: {
-    alignItems: 'flex-start',
-    backgroundColor: colors.blueSoft,
-    borderRadius: radii.md,
-    flexDirection: 'row',
-    gap: spacing[2],
-    padding: spacing[3],
-  },
-  modeNoticeText: {
-    color: colors.ink,
-    flex: 1,
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  questionsSection: {
-    gap: spacing[3],
-    paddingTop: spacing[8],
-  },
-  question: {
-    backgroundColor: colors.amberSoft,
-    borderRadius: radii.md,
-    gap: spacing[2],
-    padding: spacing[4],
-  },
-  questionPrompt: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  questionOptions: {
-    color: colors.amber,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  actionsSection: {
-    gap: spacing[4],
-    paddingTop: spacing[8],
-  },
-  sectionHeadingRow: {
-    alignItems: 'baseline',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 20,
-    fontWeight: '700',
-    letterSpacing: -0.3,
-  },
-  sectionHint: {
-    color: colors.faint,
-    fontSize: 12,
-  },
-  emptyState: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.line,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    gap: spacing[2],
-    padding: spacing[6],
-  },
-  emptyTitle: {
-    color: colors.ink,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  emptyBody: {
-    color: colors.muted,
-    fontSize: 13,
-    lineHeight: 19,
-    textAlign: 'center',
-  },
-  errorInline: {
-    alignItems: 'flex-start',
-    backgroundColor: colors.coralSoft,
-    borderRadius: radii.md,
-    flexDirection: 'row',
-    gap: spacing[2],
-    marginTop: spacing[4],
-    padding: spacing[3],
-  },
-  errorInlineText: {
-    color: colors.coral,
-    flex: 1,
-    fontSize: 13,
-  },
-  insightsSection: {
-    backgroundColor: colors.surface,
-    borderColor: colors.line,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    marginTop: spacing[8],
-    paddingHorizontal: spacing[4],
-    paddingTop: spacing[4],
-  },
-  insightHeading: {
-    gap: spacing[1],
-  },
-  loadingInsights: {
-    color: colors.muted,
-    fontSize: 14,
-    paddingVertical: spacing[5],
-  },
-  errorState: {
-    alignSelf: 'center',
-    gap: spacing[3],
-    maxWidth: 480,
-    paddingTop: spacing[10],
-    width: '100%',
-  },
-  errorIcon: {
-    alignItems: 'center',
-    backgroundColor: colors.coralSoft,
-    borderRadius: radii.md,
-    height: 48,
-    justifyContent: 'center',
-    width: 48,
-  },
-  errorTitle: {
-    color: colors.ink,
-    fontSize: 24,
-    fontWeight: '700',
-  },
-  errorBody: {
-    color: colors.muted,
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: spacing[2],
-  },
-});
