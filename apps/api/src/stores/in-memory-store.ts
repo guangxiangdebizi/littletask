@@ -3,10 +3,11 @@ import { randomUUID } from 'node:crypto';
 import {
   activityEventSchema,
   dataSummarySchema,
+  groundedSuggestionInputSchema,
   type ActivityEvent,
   type ActionType,
   type DataSummary,
-  type HistoryItem,
+  type GroundedSuggestionInput,
   type Insight,
   type Intake,
 } from '@littletask/contracts';
@@ -15,6 +16,7 @@ import { toHistoryItem } from '../history';
 import type {
   AnalyzeInput,
   ClaimedAnalysisJob,
+  ClaimedSuggestionJob,
   ExecutionRecordInput,
   ExecutionRecord,
   IntakeStore,
@@ -22,6 +24,7 @@ import type {
   ExecutionObservation,
   HistoryCursor,
   HistoryStorePage,
+  SuggestionJobState,
 } from '../types';
 
 interface MemoryJob {
@@ -29,6 +32,21 @@ interface MemoryJob {
   intakeId: string;
   status: 'queued' | 'processing' | 'retry' | 'succeeded' | 'failed';
   input: AnalyzeInput | null;
+  attempts: number;
+  maxAttempts: number;
+  availableAt: number;
+  lockedAt: number | null;
+  lockedBy: string | null;
+  lastErrorCode: string | null;
+}
+
+interface MemorySuggestionJob {
+  id: string;
+  intakeId: string;
+  status: 'queued' | 'processing' | 'retry' | 'succeeded' | 'failed';
+  generation: number;
+  inputHash: string;
+  input: GroundedSuggestionInput;
   attempts: number;
   maxAttempts: number;
   availableAt: number;
@@ -77,6 +95,7 @@ export class InMemoryIntakeStore implements IntakeStore {
   readonly #executions = new Map<string, MemoryExecution>();
   readonly #revisions: MemoryRevision[] = [];
   readonly #jobs = new Map<string, MemoryJob>();
+  readonly #suggestionJobs = new Map<string, MemorySuggestionJob>();
   readonly #modelRuns: ModelRunRecord[] = [];
 
   async create(intake: Intake, analysisInput: AnalyzeInput, maxAttempts: number): Promise<void> {
@@ -144,7 +163,7 @@ export class InMemoryIntakeStore implements IntakeStore {
     ];
 
     const latestModelRun = this.#modelRuns
-      .filter((run) => run.intakeId === intakeId)
+      .filter((run) => run.intakeId === intakeId && ['analysis', 'review'].includes(run.stage))
       .toSorted((left, right) => right.completedAt.getTime() - left.completedAt.getTime())[0];
     if (latestModelRun && ['ready', 'failed'].includes(intake.status)) {
       events.push(
@@ -248,6 +267,9 @@ export class InMemoryIntakeStore implements IntakeStore {
     for (const [jobId, job] of this.#jobs) {
       if (job.intakeId === id) this.#jobs.delete(jobId);
     }
+    for (const [jobId, job] of this.#suggestionJobs) {
+      if (job.intakeId === id) this.#suggestionJobs.delete(jobId);
+    }
     for (const [key, confirmation] of this.#confirmations) {
       if (actionIds.has(confirmation.actionId)) this.#confirmations.delete(key);
     }
@@ -274,6 +296,7 @@ export class InMemoryIntakeStore implements IntakeStore {
     this.#confirmations.clear();
     this.#executions.clear();
     this.#jobs.clear();
+    this.#suggestionJobs.clear();
     this.#revisions.splice(0);
     this.#modelRuns.splice(0);
     return count;
@@ -283,8 +306,153 @@ export class InMemoryIntakeStore implements IntakeStore {
     return structuredClone(this.#insights.get(intakeId) ?? []);
   }
 
-  async setInsights(intakeId: string, insights: Insight[]): Promise<void> {
-    this.#insights.set(intakeId, structuredClone(insights));
+  async setRuleInsights(intakeId: string, insights: Insight[]): Promise<void> {
+    const modelInsights = (this.#insights.get(intakeId) ?? []).filter(
+      (insight) => insight.generator === 'model',
+    );
+    this.#insights.set(
+      intakeId,
+      structuredClone([
+        ...insights.filter((insight) => insight.generator === 'rules'),
+        ...modelInsights,
+      ]),
+    );
+  }
+
+  async enqueueSuggestionJob(
+    input: GroundedSuggestionInput,
+    inputHash: string,
+    maxAttempts: number,
+  ): Promise<boolean> {
+    const parsedInput = groundedSuggestionInputSchema.parse(input);
+    if (!/^[a-f0-9]{64}$/.test(inputHash)) {
+      throw new Error('Suggestion input hash must be a lowercase SHA-256 value');
+    }
+    const existing = [...this.#suggestionJobs.values()].find(
+      (job) => job.intakeId === parsedInput.intakeId,
+    );
+    if (existing?.inputHash === inputHash && existing.status !== 'failed') return false;
+
+    if (existing) this.#suggestionJobs.delete(existing.id);
+    const id = randomUUID();
+    this.#suggestionJobs.set(id, {
+      id,
+      intakeId: parsedInput.intakeId,
+      status: 'queued',
+      generation: (existing?.generation ?? 0) + 1,
+      inputHash,
+      input: structuredClone(parsedInput),
+      attempts: 0,
+      maxAttempts,
+      availableAt: Date.now(),
+      lockedAt: null,
+      lockedBy: null,
+      lastErrorCode: null,
+    });
+    this.#insights.set(
+      parsedInput.intakeId,
+      (this.#insights.get(parsedInput.intakeId) ?? []).filter(
+        (insight) => insight.generator === 'rules',
+      ),
+    );
+    return true;
+  }
+
+  async getSuggestionJobState(intakeId: string): Promise<SuggestionJobState> {
+    const job = [...this.#suggestionJobs.values()].find((item) => item.intakeId === intakeId);
+    if (!job) return { status: 'not_requested', generation: null };
+    const statuses = {
+      queued: 'queued',
+      retry: 'queued',
+      processing: 'processing',
+      succeeded: 'ready',
+      failed: 'failed',
+    } as const;
+    return { status: statuses[job.status], generation: job.generation };
+  }
+
+  async claimSuggestionJob(
+    workerId: string,
+    staleAfterMs: number,
+  ): Promise<ClaimedSuggestionJob | null> {
+    const now = Date.now();
+    const jobs = [...this.#suggestionJobs.values()].toSorted(
+      (left, right) => left.availableAt - right.availableAt,
+    );
+
+    for (const job of jobs) {
+      const abandoned =
+        job.status === 'processing' && job.lockedAt !== null && job.lockedAt <= now - staleAfterMs;
+      if (abandoned && job.attempts >= job.maxAttempts) {
+        await this.failSuggestionJob(job.id, job.generation, 'JOB_LEASE_EXHAUSTED');
+        continue;
+      }
+      const available =
+        ((job.status === 'queued' || job.status === 'retry') && job.availableAt <= now) ||
+        abandoned;
+      if (!available || job.attempts >= job.maxAttempts) continue;
+
+      job.status = 'processing';
+      job.attempts += 1;
+      job.lockedAt = now;
+      job.lockedBy = workerId;
+      return {
+        ...structuredClone(job.input),
+        jobId: job.id,
+        generation: job.generation,
+        attempt: job.attempts,
+        maxAttempts: job.maxAttempts,
+      };
+    }
+    return null;
+  }
+
+  async completeSuggestionJob(
+    jobId: string,
+    generation: number,
+    insights: Insight[],
+  ): Promise<boolean> {
+    const job = this.#suggestionJobs.get(jobId);
+    if (!job || job.generation !== generation || job.status !== 'processing') return false;
+    const ruleInsights = (this.#insights.get(job.intakeId) ?? []).filter(
+      (insight) => insight.generator === 'rules',
+    );
+    this.#insights.set(
+      job.intakeId,
+      structuredClone([
+        ...ruleInsights,
+        ...insights.filter((insight) => insight.generator === 'model'),
+      ]),
+    );
+    job.status = 'succeeded';
+    job.lockedAt = null;
+    job.lockedBy = null;
+    job.lastErrorCode = null;
+    return true;
+  }
+
+  async rescheduleSuggestionJob(
+    jobId: string,
+    generation: number,
+    delayMs: number,
+    errorCode: string,
+  ): Promise<void> {
+    const job = this.#suggestionJobs.get(jobId);
+    if (!job || job.generation !== generation) return;
+    job.status = 'retry';
+    job.availableAt = Date.now() + delayMs;
+    job.lockedAt = null;
+    job.lockedBy = null;
+    job.lastErrorCode = errorCode;
+  }
+
+  async failSuggestionJob(jobId: string, generation: number, errorCode: string): Promise<void> {
+    const job = this.#suggestionJobs.get(jobId);
+    if (!job || job.generation !== generation) return;
+    job.status = 'failed';
+    job.lockedAt = null;
+    job.lockedBy = null;
+    job.lastErrorCode = errorCode;
   }
 
   async rememberConfirmation(

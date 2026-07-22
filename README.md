@@ -24,7 +24,7 @@ The project is in active development. The first vertical slice includes:
 - Review cursor-paginated history and action provenance
 - Delete one intake or all retained server-side data
 
-The GPT-5.6 Terra provider is implemented with stateless analysis and review requests. PostgreSQL persists the complete intake/action audit trail and feeds a restart-safe standalone analysis worker. The iOS client includes editable revision-bound cards, local contact matching, calendar conflict checks, native Contacts/Calendar adapters, a SQLite execution ledger, history provenance, and privacy controls. Its iOS JavaScript bundle passes locally; an EAS build and physical-device acceptance remain before TestFlight. A rotated runtime credential is still required for the live gateway compatibility check. The full product and delivery plan is documented in [plan.md](./plan.md).
+The GPT-5.6 Terra provider is implemented with stateless analysis, review, and evidence-constrained suggestion requests. PostgreSQL persists the complete intake/action audit trail and feeds a restart-safe standalone AI worker. The iOS client includes editable revision-bound cards, local contact matching, calendar conflict checks, native Contacts/Calendar adapters, a SQLite execution ledger, asynchronous model-suggestion polling, history provenance, and privacy controls. Its iOS JavaScript bundle passes locally; an EAS build and physical-device acceptance remain before TestFlight. A rotated runtime credential is still required for the live gateway compatibility check. The full product and delivery plan is documented in [plan.md](./plan.md).
 
 ## Stack
 
@@ -37,7 +37,7 @@ The GPT-5.6 Terra provider is implemented with stateless analysis and review req
 
 ```text
 apps/mobile        Expo React app for iOS and Web acceptance
-apps/api           Fastify API, Prisma schema, migrations, and analysis worker
+apps/api           Fastify API, Prisma schema, migrations, and AI worker
 packages/contracts Shared Zod API and Action Card contracts
 packages/domain    Framework-independent state and insight rules
 infra/pm2          Separate production API and worker process definitions
@@ -89,7 +89,7 @@ Start `corepack pnpm dev:worker` in another terminal. See [docs/persistence.md](
 
 Native execution is never performed by the Web acceptance build. See [docs/native-execution.md](./docs/native-execution.md) for permission timing, confirmation ordering, duplicate/conflict checks, crash recovery, and the physical-device test checklist.
 
-History returns compact summaries through an opaque cursor rather than downloading every intake. Each intake exposes a provenance timeline for AI revisions, user edits and confirmations, and device results. The privacy page shows retained counts, deletes a single intake or all server-side records, and separately clears the local execution ledger. See [docs/history-and-privacy.md](./docs/history-and-privacy.md).
+History returns compact summaries through an opaque cursor rather than downloading every intake. Each intake exposes a provenance timeline for AI revisions, user edits and confirmations, and device results. The privacy page shows retained counts, deletes a single intake or all server-side records, and separately clears the local execution ledger. Grounded model advice runs in a separate generation-safe queue and can only cite the server's bounded evidence registry. See [docs/history-and-privacy.md](./docs/history-and-privacy.md) and [docs/grounded-insights.md](./docs/grounded-insights.md).
 
 Run the complete local quality gate:
 

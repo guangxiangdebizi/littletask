@@ -10,7 +10,7 @@ import { createIntakeService } from './runtime';
 
 const config = loadConfig();
 if (config.PERSISTENCE_PROVIDER !== 'postgres') {
-  throw new Error('The standalone analysis worker requires PERSISTENCE_PROVIDER=postgres');
+  throw new Error('The standalone AI worker requires PERSISTENCE_PROVIDER=postgres');
 }
 
 const logger = pino({
@@ -27,11 +27,11 @@ let stopping = false;
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
     stopping = true;
-    logger.info({ signal, workerId }, 'Stopping analysis worker');
+    logger.info({ signal, workerId }, 'Stopping AI worker');
   });
 }
 
-logger.info({ workerId }, 'Analysis worker started');
+logger.info({ workerId }, 'AI worker started');
 while (!stopping) {
   try {
     const processed = await service.processNextJob(workerId);
@@ -41,10 +41,10 @@ while (!stopping) {
       typeof error === 'object' && error !== null && 'code' in error
         ? String(error.code)
         : 'WORKER_TICK_FAILED';
-    logger.error({ code, workerId }, 'Analysis worker tick failed');
+    logger.error({ code, workerId }, 'AI worker tick failed');
     await wait(config.JOB_POLL_MS);
   }
 }
 
 await store.close();
-logger.info({ workerId }, 'Analysis worker stopped');
+logger.info({ workerId }, 'AI worker stopped');

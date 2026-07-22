@@ -5,15 +5,21 @@ import {
   activityResponseSchema,
   clearAllDataResponseSchema,
   contactPayloadSchema,
+  groundedSuggestionInputSchema,
   historyPageSchema,
+  insightResponseSchema,
+  insightSchema,
   meetingPayloadSchema,
   updateContactPayloadSchema,
   type ActionCard,
   type ActionPatchRequest,
   type AnalysisDraft,
   type ExecutionResultRequest,
+  type GroundedSuggestionInput,
   type HistoryPage,
   type HistoryQuery,
+  type Insight,
+  type InsightEvidence,
   type Intake,
 } from '@littletask/contracts';
 import { assertActionTransition, deriveInsights } from '@littletask/domain';
@@ -23,6 +29,7 @@ import type {
   AIProvider,
   AnalyzeInput,
   ClaimedAnalysisJob,
+  ClaimedSuggestionJob,
   IntakeStore,
   ModelRunRecord,
 } from './types';
@@ -65,7 +72,7 @@ const defaultOptions: IntakeServiceOptions = {
   schemaVersion: '1',
 };
 
-const retryableAnalysisErrors = new Set([
+const retryableModelErrors = new Set([
   'MODEL_GATEWAY_ERROR',
   'MODEL_GATEWAY_UNAVAILABLE',
   'MODEL_RATE_LIMITED',
@@ -328,7 +335,11 @@ export class IntakeService {
 
   async getInsights(intakeId: string) {
     await this.get(intakeId);
-    return this.store.getInsights(intakeId);
+    const [items, generation] = await Promise.all([
+      this.store.getInsights(intakeId),
+      this.store.getSuggestionJobState(intakeId),
+    ]);
+    return insightResponseSchema.parse({ items, generationStatus: generation.status });
   }
 
   private async refreshDerivedInsights(intake: Intake): Promise<void> {
@@ -336,17 +347,57 @@ export class IntakeService {
       this.store.list(),
       this.store.listExecutionObservations(intake.id),
     ]);
-    await this.store.setInsights(
-      intake.id,
-      deriveInsights(
-        {
-          intake,
-          relatedIntakes: relatedIntakes.filter((candidate) => candidate.id !== intake.id),
-          executions,
-        },
-        { createId: randomUUID, now: () => new Date() },
-      ),
+    const ruleInsights = deriveInsights(
+      {
+        intake,
+        relatedIntakes: relatedIntakes.filter((candidate) => candidate.id !== intake.id),
+        executions,
+      },
+      { createId: randomUUID, now: () => new Date() },
     );
+    await this.store.setRuleInsights(intake.id, ruleInsights);
+
+    const suggestionInput = this.buildSuggestionInput(intake, ruleInsights);
+    if (!suggestionInput) return;
+    const inputHash = createHash('sha256').update(JSON.stringify(suggestionInput)).digest('hex');
+    const enqueued = await this.store.enqueueSuggestionJob(
+      suggestionInput,
+      inputHash,
+      this.options.maxJobAttempts,
+    );
+    if (enqueued && this.options.inlineWorker) this.scheduleInlineWorker();
+  }
+
+  private buildSuggestionInput(
+    intake: Intake,
+    ruleInsights: Insight[],
+  ): GroundedSuggestionInput | null {
+    const succeededActions = intake.actions.filter((action) => action.status === 'succeeded');
+    if (succeededActions.length === 0) return null;
+    const actionIds = new Set(succeededActions.map((action) => action.id));
+    const evidence: InsightEvidence[] = [];
+    const evidenceKeys = new Set<string>();
+
+    for (const insight of ruleInsights) {
+      if (!insight.actionId || !actionIds.has(insight.actionId)) continue;
+      for (const item of insight.evidence) {
+        const key = JSON.stringify(item);
+        if (evidenceKeys.has(key)) continue;
+        evidenceKeys.add(key);
+        evidence.push(item);
+        if (evidence.length === 50) break;
+      }
+      if (evidence.length === 50) break;
+    }
+    if (evidence.length === 0) return null;
+
+    return groundedSuggestionInputSchema.parse({
+      intakeId: intake.id,
+      locale: intake.locale,
+      summary: intake.summary,
+      actions: succeededActions.map((action) => ({ id: action.id, type: action.type })),
+      evidence: evidence.map((value, index) => ({ id: `E${index + 1}`, value })),
+    });
   }
 
   private decodeHistoryCursor(value: string) {
@@ -360,14 +411,23 @@ export class IntakeService {
   }
 
   async processNextJob(workerId: string, staleAfterMs = this.options.jobLeaseMs): Promise<boolean> {
-    const job = await this.store.claimAnalysisJob(workerId, staleAfterMs);
-    if (!job) return false;
+    const analysisJob = await this.store.claimAnalysisJob(workerId, staleAfterMs);
+    if (analysisJob) {
+      await this.processAnalysisJob(analysisJob);
+      return true;
+    }
+    const suggestionJob = await this.store.claimSuggestionJob(workerId, staleAfterMs);
+    if (!suggestionJob) return false;
+    await this.processSuggestionJob(suggestionJob);
+    return true;
+  }
 
+  private async processAnalysisJob(job: ClaimedAnalysisJob): Promise<void> {
     try {
       const current = await this.get(job.intakeId);
       if (current.status === 'ready') {
         await this.store.completeAnalysisJob(job.jobId);
-        return true;
+        return;
       }
 
       await this.store.replace({
@@ -376,8 +436,10 @@ export class IntakeService {
         error: null,
         updatedAt: new Date().toISOString(),
       });
-      const draft = await this.runModelStage(job, 'analysis', () => this.provider.analyze(job));
-      const reviewed = await this.runModelStage(job, 'review', () =>
+      const draft = await this.runModelStage(job.intakeId, 'analysis', () =>
+        this.provider.analyze(job),
+      );
+      const reviewed = await this.runModelStage(job.intakeId, 'review', () =>
         this.provider.review(job, draft),
       );
       const processing = await this.get(job.intakeId);
@@ -385,14 +447,32 @@ export class IntakeService {
       await this.store.completeAnalysisJob(job.jobId);
     } catch (error) {
       const code = this.errorCode(error);
-      if (retryableAnalysisErrors.has(code) && job.attempt < job.maxAttempts) {
+      if (retryableModelErrors.has(code) && job.attempt < job.maxAttempts) {
         const delayMs = Math.min(5 * 60_000, 1_000 * 2 ** (job.attempt - 1));
         await this.store.rescheduleAnalysisJob(job.jobId, delayMs, code);
       } else {
         await this.store.failAnalysisJob(job.jobId, code, this.safeAnalysisMessage(error));
       }
     }
-    return true;
+  }
+
+  private async processSuggestionJob(job: ClaimedSuggestionJob): Promise<void> {
+    try {
+      const drafts = await this.runModelStage(job.intakeId, 'insight', () =>
+        this.provider.suggestInsights(job),
+      );
+      const currentInsights = await this.store.getInsights(job.intakeId);
+      const insights = this.materializeSuggestions(job, drafts, currentInsights);
+      await this.store.completeSuggestionJob(job.jobId, job.generation, insights);
+    } catch (error) {
+      const code = this.errorCode(error, 'INSIGHT_GENERATION_FAILED');
+      if (retryableModelErrors.has(code) && job.attempt < job.maxAttempts) {
+        const delayMs = Math.min(5 * 60_000, 1_000 * 2 ** (job.attempt - 1));
+        await this.store.rescheduleSuggestionJob(job.jobId, job.generation, delayMs, code);
+      } else {
+        await this.store.failSuggestionJob(job.jobId, job.generation, code);
+      }
+    }
   }
 
   private scheduleInlineWorker(): void {
@@ -411,19 +491,29 @@ export class IntakeService {
   }
 
   private async runModelStage<T>(
-    job: ClaimedAnalysisJob,
-    stage: 'analysis' | 'review',
+    intakeId: string,
+    stage: ModelRunRecord['stage'],
     run: () => Promise<T>,
   ): Promise<T> {
     const startedAt = new Date();
     const started = Date.now();
     try {
       const result = await run();
-      await this.recordModelRun(job, stage, 'succeeded', startedAt, started, null);
+      await this.recordModelRun(intakeId, stage, 'succeeded', startedAt, started, null);
       return result;
     } catch (error) {
       try {
-        await this.recordModelRun(job, stage, 'failed', startedAt, started, this.errorCode(error));
+        await this.recordModelRun(
+          intakeId,
+          stage,
+          'failed',
+          startedAt,
+          started,
+          this.errorCode(
+            error,
+            stage === 'insight' ? 'INSIGHT_GENERATION_FAILED' : 'ANALYSIS_FAILED',
+          ),
+        );
       } catch {
         // Preserve the provider error; queue failure handling remains authoritative.
       }
@@ -432,8 +522,8 @@ export class IntakeService {
   }
 
   private recordModelRun(
-    job: ClaimedAnalysisJob,
-    stage: 'analysis' | 'review',
+    intakeId: string,
+    stage: ModelRunRecord['stage'],
     status: ModelRunRecord['status'],
     startedAt: Date,
     started: number,
@@ -441,11 +531,11 @@ export class IntakeService {
   ): Promise<void> {
     return this.store.recordModelRun({
       id: randomUUID(),
-      intakeId: job.intakeId,
+      intakeId,
       stage,
       status,
       provider: this.options.providerName,
-      model: stage === 'analysis' ? this.options.analysisModel : this.options.reviewModel,
+      model: stage === 'review' ? this.options.reviewModel : this.options.analysisModel,
       reasoningEffort: this.options.reasoningEffort,
       promptVersion: this.options.promptVersion,
       schemaVersion: this.options.schemaVersion,
@@ -489,6 +579,56 @@ export class IntakeService {
     };
   }
 
+  private materializeSuggestions(
+    job: ClaimedSuggestionJob,
+    drafts: Awaited<ReturnType<AIProvider['suggestInsights']>>,
+    currentInsights: Insight[],
+  ): Insight[] {
+    const actionIds = new Set(job.actions.map((action) => action.id));
+    const evidence = new Map(job.evidence.map((item) => [item.id, item.value]));
+    const seen = new Set(
+      currentInsights.map((insight) =>
+        this.suggestionKey(insight.actionId ?? null, insight.type, insight.title),
+      ),
+    );
+    const createdAt = new Date().toISOString();
+    const results: Insight[] = [];
+
+    for (const draft of drafts) {
+      if (draft.actionId !== null && !actionIds.has(draft.actionId)) continue;
+      const evidenceIds = [...new Set(draft.evidenceIds)];
+      const referencedEvidence = evidenceIds.flatMap((id) => {
+        const value = evidence.get(id);
+        return value ? [value] : [];
+      });
+      if (referencedEvidence.length !== evidenceIds.length) continue;
+      const key = this.suggestionKey(draft.actionId, draft.type, draft.title);
+      if (seen.has(key)) continue;
+      const parsed = insightSchema.safeParse({
+        id: randomUUID(),
+        intakeId: job.intakeId,
+        ...(draft.actionId === null ? {} : { actionId: draft.actionId }),
+        type: draft.type,
+        kind: 'suggestion',
+        generator: 'model',
+        priority: draft.priority,
+        title: draft.title,
+        body: draft.body,
+        evidence: referencedEvidence,
+        createdAt,
+      });
+      if (!parsed.success) continue;
+      seen.add(key);
+      results.push(parsed.data);
+      if (results.length === 4) break;
+    }
+    return results;
+  }
+
+  private suggestionKey(actionId: string | null, type: string, title: string): string {
+    return `${actionId ?? 'intake'}:${type}:${title.trim().toLocaleLowerCase()}`;
+  }
+
   private async findAction(actionId: string): Promise<{
     intake: Intake;
     actionIndex: number;
@@ -515,12 +655,12 @@ export class IntakeService {
     }
   }
 
-  private errorCode(error: unknown): string {
+  private errorCode(error: unknown, fallback = 'ANALYSIS_FAILED'): string {
     if (typeof error === 'object' && error !== null && 'code' in error) {
       const code = String(error.code);
       if (/^[A-Z][A-Z0-9_]{1,79}$/.test(code)) return code;
     }
-    return 'ANALYSIS_FAILED';
+    return fallback;
   }
 
   private safeAnalysisMessage(error: unknown): string {

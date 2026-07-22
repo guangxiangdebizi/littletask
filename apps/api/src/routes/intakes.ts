@@ -118,9 +118,9 @@ export const intakeRoutes: FastifyPluginAsync = async (app) => {
     return app.intakeService.reportExecution(request.params.id, body);
   });
 
-  app.get<{ Params: IntakeParams }>('/intakes/:id/insights', async (request) => ({
-    items: await app.intakeService.getInsights(request.params.id),
-  }));
+  app.get<{ Params: IntakeParams }>('/intakes/:id/insights', async (request) =>
+    app.intakeService.getInsights(request.params.id),
+  );
 
   app.get<{ Params: IntakeParams }>('/intakes/:id/activity', async (request) =>
     app.intakeService.getActivity(request.params.id),

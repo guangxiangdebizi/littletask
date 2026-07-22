@@ -53,3 +53,6 @@ Desktop.ini
 playwright-report/
 test-results/
 artifacts/
+
+# Private local acceptance fixtures
+/Screenshot 2026-07-22 144719.png

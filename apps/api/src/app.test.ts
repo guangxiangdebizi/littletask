@@ -6,6 +6,7 @@ import type {
   DataSummary,
   HistoryPage,
   Insight,
+  InsightResponse,
 } from '@littletask/contracts';
 import { describe, expect, it } from 'vitest';
 
@@ -134,12 +135,15 @@ describe('LittleTask API', () => {
     expect(executed.statusCode).toBe(200);
     expect(executed.json<{ status: string }>().status).toBe('succeeded');
 
+    await wait(80);
     const insights = await app.inject({
       method: 'GET',
       url: `/api/v1/intakes/${id}/insights`,
     });
     expect(insights.statusCode).toBe(200);
-    const insightItems = insights.json<{ items: Insight[] }>().items;
+    const insightResponse = insights.json<InsightResponse>();
+    expect(insightResponse.generationStatus).toBe('ready');
+    const insightItems = insightResponse.items;
     expect(insightItems).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -152,6 +156,12 @@ describe('LittleTask API', () => {
           actionId: action.id,
           type: 'meeting_preparation',
           kind: 'suggestion',
+          generator: 'rules',
+        }),
+        expect.objectContaining({
+          actionId: action.id,
+          kind: 'suggestion',
+          generator: 'model',
         }),
       ]),
     );

@@ -117,6 +117,7 @@ export function deriveInsights(input: InsightDerivationInput, runtime: Runtime):
         ...value,
         id: runtime.createId(),
         intakeId: intake.id,
+        generator: 'rules',
         createdAt,
       }),
     );

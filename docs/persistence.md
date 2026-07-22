@@ -1,11 +1,11 @@
-# PostgreSQL persistence and analysis worker
+# PostgreSQL persistence and AI worker
 
 LittleTask has two persistence modes:
 
-- `memory` is the zero-setup development mode. The API drains analysis jobs inline and data is
+- `memory` is the zero-setup development mode. The API drains AI jobs inline and data is
   lost when the process exits.
 - `postgres` is the durable mode. The API only accepts and reads work; a separate worker claims
-  and processes analysis jobs.
+  and processes screenshot-analysis and grounded-suggestion jobs.
 
 Production must use `PERSISTENCE_PROVIDER=postgres` and run both PM2 entries from
 `infra/pm2/ecosystem.config.cjs`.
@@ -13,7 +13,7 @@ Production must use `PERSISTENCE_PROVIDER=postgres` and run both PM2 entries fro
 ## Data lifecycle
 
 The initial migration stores intakes, actions, immutable action revisions, confirmations,
-execution results, grounded insights, model-run metadata, and analysis jobs. The uploaded image
+execution results, grounded insights, model-run metadata, analysis jobs, and suggestion jobs. The uploaded image
 is held temporarily in the job row because the worker may run in another process. Its bytes are
 cleared when the job succeeds or permanently fails. Intake history retains only the image hash,
 MIME type, size, and optional original filename.
@@ -24,7 +24,7 @@ response bodies.
 
 ## Queue behavior
 
-Workers claim one due job with a PostgreSQL transaction and `FOR UPDATE SKIP LOCKED`. A claim:
+Workers claim one due job with a PostgreSQL transaction and `FOR UPDATE SKIP LOCKED`. Analysis jobs are prioritized so uploads are not delayed by follow-up generation. An analysis claim:
 
 1. increments the attempt count;
 2. records the worker and lease timestamp;
@@ -36,6 +36,8 @@ Gateway rate limits, network errors, and transient gateway failures use bounded 
 backoff. Schema and validation failures are not retried blindly. A different worker can reclaim a
 job after `JOB_LEASE_MS`; an abandoned job that has exhausted its attempt budget is failed and its
 image is deleted.
+
+Suggestion jobs store only a bounded structured evidence registry, never screenshot bytes. A new input hash increments the job generation and clears only earlier model-authored suggestions. Completion locks and checks the generation before replacing model output, so an old worker response cannot overwrite newer context. Rule-generated insights are stored independently and survive suggestion retries or permanent failure.
 
 Confirmation and execution requests use a UUID idempotency key with unique database constraints.
 Repeating the same request does not create another confirmation or execution row.

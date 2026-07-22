@@ -3,8 +3,11 @@ import type {
   AnalysisDraft,
   DataSummary,
   ExecutionDeviceContext,
+  GroundedSuggestionInput,
   HistoryItem,
   Insight,
+  InsightGenerationStatus,
+  InsightType,
   Intake,
 } from '@littletask/contracts';
 
@@ -20,6 +23,16 @@ export interface AnalyzeInput {
 export interface AIProvider {
   analyze(input: AnalyzeInput): Promise<AnalysisDraft>;
   review(input: AnalyzeInput, draft: AnalysisDraft): Promise<AnalysisDraft>;
+  suggestInsights(input: GroundedSuggestionInput): Promise<GroundedSuggestionDraft[]>;
+}
+
+export interface GroundedSuggestionDraft {
+  actionId: string | null;
+  type: Extract<InsightType, 'meeting_preparation' | 'follow_up' | 'reply_suggestion'>;
+  priority: 'medium' | 'low';
+  title: string;
+  body: string;
+  evidenceIds: string[];
 }
 
 export interface ClaimedAnalysisJob extends AnalyzeInput {
@@ -29,10 +42,17 @@ export interface ClaimedAnalysisJob extends AnalyzeInput {
   maxAttempts: number;
 }
 
+export interface ClaimedSuggestionJob extends GroundedSuggestionInput {
+  jobId: string;
+  generation: number;
+  attempt: number;
+  maxAttempts: number;
+}
+
 export interface ModelRunRecord {
   id: string;
   intakeId: string;
-  stage: 'analysis' | 'review';
+  stage: 'analysis' | 'review' | 'insight';
   status: 'succeeded' | 'failed';
   provider: string;
   model: string;
@@ -77,6 +97,11 @@ export interface HistoryStorePage {
   hasMore: boolean;
 }
 
+export interface SuggestionJobState {
+  status: InsightGenerationStatus;
+  generation: number | null;
+}
+
 export interface IntakeStore {
   create(intake: Intake, analysisInput: AnalyzeInput, maxAttempts: number): Promise<void>;
   get(id: string): Promise<Intake | undefined>;
@@ -88,7 +113,22 @@ export interface IntakeStore {
   delete(id: string): Promise<boolean>;
   deleteAll(): Promise<number>;
   getInsights(intakeId: string): Promise<Insight[]>;
-  setInsights(intakeId: string, insights: Insight[]): Promise<void>;
+  setRuleInsights(intakeId: string, insights: Insight[]): Promise<void>;
+  enqueueSuggestionJob(
+    input: GroundedSuggestionInput,
+    inputHash: string,
+    maxAttempts: number,
+  ): Promise<boolean>;
+  getSuggestionJobState(intakeId: string): Promise<SuggestionJobState>;
+  claimSuggestionJob(workerId: string, staleAfterMs: number): Promise<ClaimedSuggestionJob | null>;
+  completeSuggestionJob(jobId: string, generation: number, insights: Insight[]): Promise<boolean>;
+  rescheduleSuggestionJob(
+    jobId: string,
+    generation: number,
+    delayMs: number,
+    errorCode: string,
+  ): Promise<void>;
+  failSuggestionJob(jobId: string, generation: number, errorCode: string): Promise<void>;
   rememberConfirmation(idempotencyKey: string, actionId: string, revision: number): Promise<string>;
   getConfirmation(idempotencyKey: string): Promise<string | undefined>;
   getExecution(idempotencyKey: string): Promise<ExecutionRecord | undefined>;

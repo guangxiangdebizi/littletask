@@ -115,6 +115,26 @@ export const modelAnalysisDraftSchema = z.object({
 
 export type ModelAnalysisDraft = z.infer<typeof modelAnalysisDraftSchema>;
 
+export const modelGroundedSuggestionsSchema = z.object({
+  suggestions: z
+    .array(
+      z.object({
+        actionId: z.string().uuid().nullable(),
+        type: z.enum(['meeting_preparation', 'follow_up', 'reply_suggestion']),
+        priority: z.enum(['medium', 'low']),
+        title: z.string().min(1).max(160),
+        body: z.string().min(1).max(1_000),
+        evidenceIds: z
+          .array(z.string().regex(/^E[1-9][0-9]*$/))
+          .min(1)
+          .max(5),
+      }),
+    )
+    .max(4),
+});
+
+export type ModelGroundedSuggestions = z.infer<typeof modelGroundedSuggestionsSchema>;
+
 function evidenceForDomain(evidence: ModelAnalysisDraft['actions'][number]['evidence']) {
   return evidence.map((item) => ({
     source: item.source,

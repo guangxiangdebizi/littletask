@@ -1,4 +1,9 @@
-import type { ActionCard, ActivityEvent, DataSummary, Insight } from '@littletask/contracts';
+import type {
+  ActionCard,
+  ActivityEvent,
+  DataSummary,
+  InsightResponse,
+} from '@littletask/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { buildApp } from './app';
@@ -162,6 +167,16 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
     expect(successfulRetry.json<{ status: string }>().status).toBe('succeeded');
     await apiAfterRestart.close();
 
+    const suggestionWorkerStore = new PrismaIntakeStore(createPrismaClient(databaseUrl));
+    const suggestionWorker = createIntakeService(config, {
+      store: suggestionWorkerStore,
+      inlineWorker: false,
+    });
+    expect(await suggestionWorker.service.processNextJob('suggestion-integration-worker')).toBe(
+      true,
+    );
+    await suggestionWorkerStore.close();
+
     expect(await prisma.actionConfirmation.count({ where: { idempotencyKey } })).toBe(1);
     expect(await prisma.actionExecution.count({ where: { idempotencyKey } })).toBe(1);
     expect(
@@ -170,7 +185,8 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
       }),
     ).toBe(2);
     expect(await prisma.actionRevision.count({ where: { actionId: action.id } })).toBe(1);
-    expect(await prisma.modelRun.count({ where: { intakeId: id } })).toBe(2);
+    expect(await prisma.modelRun.count({ where: { intakeId: id } })).toBe(3);
+    expect(await prisma.modelRun.count({ where: { intakeId: id, stage: 'insight' } })).toBe(1);
     const finishedJob = await prisma.analysisJob.findUniqueOrThrow({ where: { intakeId: id } });
     expect(finishedJob.status).toBe('succeeded');
     expect(finishedJob.imagePayload).toBeNull();
@@ -190,7 +206,11 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
         expect.objectContaining({ kind: 'observation', type: 'schedule_conflict' }),
         expect.objectContaining({ kind: 'observation', type: 'duplicate_contact' }),
         expect.objectContaining({ kind: 'suggestion', type: 'meeting_preparation' }),
+        expect.objectContaining({ kind: 'suggestion', generator: 'model' }),
       ]),
+    );
+    expect(await prisma.suggestionJob.findUniqueOrThrow({ where: { intakeId: id } })).toMatchObject(
+      { status: 'succeeded', generation: 2 },
     );
 
     const apiSecondRestart = await buildApp({ config, logger: false, inlineWorker: false });
@@ -203,7 +223,9 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
       method: 'GET',
       url: `/api/v1/intakes/${id}/insights`,
     });
-    expect(persistedInsights.json<{ items: Insight[] }>().items).toEqual(
+    const persistedInsightResponse = persistedInsights.json<InsightResponse>();
+    expect(persistedInsightResponse.generationStatus).toBe('ready');
+    expect(persistedInsightResponse.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ type: 'schedule_conflict', kind: 'observation' }),
         expect.objectContaining({ type: 'duplicate_contact', kind: 'observation' }),
@@ -239,8 +261,9 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
         prisma.insight.count({ where: { intakeId: id } }),
         prisma.modelRun.count({ where: { intakeId: id } }),
         prisma.analysisJob.count({ where: { intakeId: id } }),
+        prisma.suggestionJob.count({ where: { intakeId: id } }),
       ]),
-    ).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+    ).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0]);
     expect(
       (
         await apiSecondRestart.inject({ method: 'GET', url: '/api/v1/data-summary' })

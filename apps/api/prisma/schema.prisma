@@ -25,6 +25,7 @@ enum AnalysisJobStatus {
 enum ModelRunStage {
   analysis
   review
+  insight
 }
 
 enum ModelRunStatus {
@@ -66,6 +67,7 @@ model Intake {
   insights  Insight[]
   modelRuns ModelRun[]
   job       AnalysisJob?
+  suggestionJob SuggestionJob?
 
   @@index([createdAt(sort: Desc)])
   @@map("intakes")
@@ -145,6 +147,7 @@ model Insight {
   actionId  String?  @map("action_id") @db.Uuid
   type      String
   kind      String   @default("observation")
+  generator String   @default("rules")
   priority  String
   title     String
   body      String
@@ -204,4 +207,27 @@ model AnalysisJob {
 
   @@index([status, availableAt])
   @@map("analysis_jobs")
+}
+
+model SuggestionJob {
+  id               String            @id @db.Uuid
+  intakeId         String            @unique @map("intake_id") @db.Uuid
+  status           AnalysisJobStatus
+  generation       Int
+  inputHash        String            @map("input_hash") @db.Char(64)
+  input             Json
+  attempts          Int               @default(0)
+  maxAttempts       Int               @map("max_attempts")
+  availableAt       DateTime          @map("available_at") @db.Timestamptz(3)
+  lockedAt          DateTime?         @map("locked_at") @db.Timestamptz(3)
+  lockedBy          String?           @map("locked_by")
+  lastErrorCode     String?           @map("last_error_code")
+  completedAt       DateTime?         @map("completed_at") @db.Timestamptz(3)
+  createdAt         DateTime          @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime          @map("updated_at") @db.Timestamptz(3)
+
+  intake Intake @relation(fields: [intakeId], references: [id], onDelete: Cascade)
+
+  @@index([status, availableAt])
+  @@map("suggestion_jobs")
 }

@@ -46,7 +46,11 @@ export function useActionReview(intakeId?: string, actionId?: string) {
           }
         : current,
     );
-    void queryClient.invalidateQueries({ queryKey: ['history'] });
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['history'] }),
+      queryClient.invalidateQueries({ queryKey: ['insights', intakeId] }),
+      queryClient.invalidateQueries({ queryKey: ['activity', intakeId] }),
+    ]);
   };
 
   const patchMutation = useMutation({

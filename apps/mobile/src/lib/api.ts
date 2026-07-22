@@ -5,7 +5,7 @@ import {
   createIntakeResponseSchema,
   dataSummarySchema,
   historyPageSchema,
-  insightSchema,
+  insightResponseSchema,
   intakeSchema,
   type ActionCard,
   type ActionPatchRequest,
@@ -15,7 +15,7 @@ import {
   type ExecutionDeviceContext,
   type DataSummary,
   type HistoryPage,
-  type Insight,
+  type InsightResponse,
   type Intake,
 } from '@littletask/contracts';
 import type { ImagePickerAsset } from 'expo-image-picker';
@@ -180,7 +180,6 @@ export async function reportActionExecution(
   return actionCardSchema.parse(body);
 }
 
-export async function getInsights(intakeId: string): Promise<Insight[]> {
-  const response = (await requestJson(`/intakes/${intakeId}/insights`)) as { items?: unknown[] };
-  return insightSchema.array().parse(response.items ?? []);
+export async function getInsights(intakeId: string): Promise<InsightResponse> {
+  return insightResponseSchema.parse(await requestJson(`/intakes/${intakeId}/insights`));
 }

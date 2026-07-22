@@ -17,7 +17,13 @@ export function InsightRow({ insight }: { insight: Insight }) {
       <View style={styles.copy}>
         <View style={styles.titleRow}>
           <Text style={styles.title}>{insight.title}</Text>
-          <Text style={styles.kindTag}>{insight.kind === 'observation' ? '事实提醒' : '建议'}</Text>
+          <Text style={styles.kindTag}>
+            {insight.kind === 'observation'
+              ? '事实提醒'
+              : insight.generator === 'model'
+                ? 'AI 建议'
+                : '建议'}
+          </Text>
         </View>
         <Text style={styles.body}>{insight.body}</Text>
         <View accessibilityLabel="洞察依据" style={styles.evidenceList}>

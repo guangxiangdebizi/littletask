@@ -19,4 +19,20 @@ export class FakeAIProvider implements AIProvider {
     await new Promise((resolve) => setTimeout(resolve, 20));
     return draft;
   }
+
+  async suggestInsights(input: Parameters<AIProvider['suggestInsights']>[0]) {
+    const evidence = input.evidence[0];
+    const action = input.actions[0];
+    if (!evidence) return [];
+    return [
+      {
+        actionId: action?.id ?? null,
+        type: 'follow_up' as const,
+        priority: 'low' as const,
+        title: '确认下一步安排',
+        body: '可以根据已经确认的上下文，发送一条简短的后续确认。',
+        evidenceIds: [evidence.id],
+      },
+    ];
+  }
 }

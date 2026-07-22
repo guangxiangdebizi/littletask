@@ -12,7 +12,17 @@ LittleTask separates verified observations from suggestions. Every insight is sc
 - follow-up suggestions after a contact write succeeds;
 - a matching person in a previously succeeded LittleTask action.
 
-The engine recalculates the intake's insights after confirmation and after every accepted execution result. Recalculation replaces the previous derived set, so stale conflict or failure messages do not accumulate.
+The engine recalculates the intake's rule-generated insights after confirmation and after every accepted execution result. Recalculation replaces only the previous rule set, so stale conflict or failure messages do not accumulate and an AI failure cannot remove verified observations.
+
+## Asynchronous model suggestions
+
+After at least one action succeeds, the API builds a bounded evidence registry from the deterministic insights. Each entry receives a server-generated ID such as `E1`; the model receives only succeeded action IDs/types, the intake summary, and those registered evidence values. It cannot read device contact candidates, calendar item details, or the original screenshot during this stage.
+
+The suggestion worker may return at most four `meeting_preparation`, `follow_up`, or `reply_suggestion` items. Deterministic validation rejects unknown action IDs, invented evidence IDs, malformed items, and duplicates before persistence. Accepted items are stored with `kind=suggestion` and `generator=model` so the UI can distinguish them from rule output.
+
+Suggestion work has an input hash and monotonically increasing generation. A repeated context does not enqueue duplicate work, while a newer context clears stale model suggestions and prevents an older in-flight response from overwriting the new generation. Retryable gateway failures use the same bounded backoff as screenshot analysis; a permanent failure exposes `generationStatus=failed` while all deterministic insights remain available.
+
+`GET /api/v1/intakes/:id/insights` returns both `items` and `generationStatus`. The mobile client polls only while that status is `queued` or `processing`.
 
 ## Evidence model
 
@@ -28,4 +38,4 @@ The device context contains only `possibleDuplicateContactCount` and `calendarCo
 
 Domain tests cover calendar conflicts, duplicate contacts, failures, evidence types, fact/suggestion separation, and relevant-history filtering. API and PostgreSQL integration tests verify device-context persistence and insight survival across process restarts. The iOS export verifies the SQLite ledger migration and reporting code can be bundled for the native target.
 
-AI-authored advice is intentionally not part of this deterministic module. It will run asynchronously and may reference only a server-provided evidence registry; deterministic observations remain available if the model call fails.
+The async suggestion queue, stale-generation rejection, and gateway behavior will be exercised in the final consolidated test pass after the remaining product modules are complete.

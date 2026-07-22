@@ -10,6 +10,7 @@ export const insightTypeSchema = z.enum([
 ]);
 
 export const insightKindSchema = z.enum(['observation', 'suggestion']);
+export const insightGeneratorSchema = z.enum(['rules', 'model']);
 
 export const insightEvidenceSchema = z.object({
   source: z.enum([
@@ -33,6 +34,7 @@ export const insightSchema = z.object({
   actionId: z.string().uuid().optional(),
   type: insightTypeSchema,
   kind: insightKindSchema,
+  generator: insightGeneratorSchema,
   priority: z.enum(['high', 'medium', 'low']),
   title: z.string().min(1).max(160),
   body: z.string().min(1).max(1_000),
@@ -42,3 +44,44 @@ export const insightSchema = z.object({
 
 export type Insight = z.infer<typeof insightSchema>;
 export type InsightEvidence = z.infer<typeof insightEvidenceSchema>;
+
+export const insightGenerationStatusSchema = z.enum([
+  'not_requested',
+  'queued',
+  'processing',
+  'ready',
+  'failed',
+]);
+
+export const insightResponseSchema = z.object({
+  items: z.array(insightSchema),
+  generationStatus: insightGenerationStatusSchema,
+});
+
+export type InsightGenerationStatus = z.infer<typeof insightGenerationStatusSchema>;
+export type InsightResponse = z.infer<typeof insightResponseSchema>;
+
+export const groundedSuggestionInputSchema = z.object({
+  intakeId: z.string().uuid(),
+  locale: z.string().min(2).max(40),
+  summary: z.string().max(1_000).nullable(),
+  actions: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        type: z.enum(['create_event', 'create_contact', 'update_contact']),
+      }),
+    )
+    .max(20),
+  evidence: z
+    .array(
+      z.object({
+        id: z.string().regex(/^E[1-9][0-9]*$/),
+        value: insightEvidenceSchema,
+      }),
+    )
+    .min(1)
+    .max(50),
+});
+
+export type GroundedSuggestionInput = z.infer<typeof groundedSuggestionInputSchema>;

@@ -8,11 +8,13 @@ import {
   actionCardSchema,
   dataSummarySchema,
   executionDeviceContextSchema,
+  groundedSuggestionInputSchema,
   historyItemSchema,
   insightSchema,
   intakeSchema,
   type ActivityEvent,
   type DataSummary,
+  type GroundedSuggestionInput,
   type Insight,
   type Intake,
 } from '@littletask/contracts';
@@ -22,6 +24,7 @@ import { historyOutcome, summarizeActions } from '../history';
 import type {
   AnalyzeInput,
   ClaimedAnalysisJob,
+  ClaimedSuggestionJob,
   ExecutionRecordInput,
   ExecutionRecord,
   ExecutionObservation,
@@ -29,6 +32,7 @@ import type {
   HistoryStorePage,
   IntakeStore,
   ModelRunRecord,
+  SuggestionJobState,
 } from '../types';
 
 const intakeInclude = {
@@ -49,6 +53,23 @@ interface ClaimedJobRow {
 
 interface ExhaustedJobRow {
   intake_id: string;
+}
+
+interface ClaimedSuggestionJobRow {
+  id: string;
+  intake_id: string;
+  generation: number;
+  input: unknown;
+  attempts: number;
+  max_attempts: number;
+}
+
+interface LockedSuggestionJobRow {
+  id: string;
+  intake_id: string;
+  generation: number;
+  input_hash: string;
+  status: 'queued' | 'processing' | 'retry' | 'succeeded' | 'failed';
 }
 
 function json(value: unknown): Prisma.InputJsonValue {
@@ -216,7 +237,7 @@ export class PrismaIntakeStore implements IntakeStore {
         include: { action: { select: { type: true } } },
       }),
       this.prisma.modelRun.findFirst({
-        where: { intakeId },
+        where: { intakeId, stage: { in: ['analysis', 'review'] } },
         orderBy: { completedAt: 'desc' },
       }),
     ]);
@@ -390,6 +411,7 @@ export class PrismaIntakeStore implements IntakeStore {
         actionId: row.actionId ?? undefined,
         type: row.type,
         kind: row.kind,
+        generator: row.generator,
         priority: row.priority,
         title: row.title,
         body: row.body,
@@ -399,17 +421,19 @@ export class PrismaIntakeStore implements IntakeStore {
     );
   }
 
-  async setInsights(intakeId: string, insights: Insight[]): Promise<void> {
+  async setRuleInsights(intakeId: string, insights: Insight[]): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
-      await transaction.insight.deleteMany({ where: { intakeId } });
-      if (insights.length === 0) return;
+      await transaction.insight.deleteMany({ where: { intakeId, generator: 'rules' } });
+      const ruleInsights = insights.filter((insight) => insight.generator === 'rules');
+      if (ruleInsights.length === 0) return;
       await transaction.insight.createMany({
-        data: insights.map((insight) => ({
+        data: ruleInsights.map((insight) => ({
           id: insight.id,
           intakeId,
           actionId: insight.actionId ?? null,
           type: insight.type,
           kind: insight.kind,
+          generator: insight.generator,
           priority: insight.priority,
           title: insight.title,
           body: insight.body,
@@ -417,6 +441,256 @@ export class PrismaIntakeStore implements IntakeStore {
           createdAt: new Date(insight.createdAt),
         })),
       });
+    });
+  }
+
+  async enqueueSuggestionJob(
+    input: GroundedSuggestionInput,
+    inputHash: string,
+    maxAttempts: number,
+  ): Promise<boolean> {
+    const parsedInput = groundedSuggestionInputSchema.parse(input);
+    if (!/^[a-f0-9]{64}$/.test(inputHash)) {
+      throw new Error('Suggestion input hash must be a lowercase SHA-256 value');
+    }
+    return this.prisma.$transaction(async (transaction) => {
+      const rows = await transaction.$queryRaw<LockedSuggestionJobRow[]>(Prisma.sql`
+        SELECT "id", "intake_id", "generation", "input_hash", "status"
+        FROM "suggestion_jobs"
+        WHERE "intake_id" = ${parsedInput.intakeId}::uuid
+        FOR UPDATE
+      `);
+      const existing = rows[0];
+      if (existing?.input_hash === inputHash && existing.status !== 'failed') return false;
+
+      const now = new Date();
+      const generation = (existing?.generation ?? 0) + 1;
+      if (existing) {
+        await transaction.suggestionJob.update({
+          where: { id: existing.id },
+          data: {
+            status: 'queued',
+            generation,
+            inputHash,
+            input: json(parsedInput),
+            attempts: 0,
+            maxAttempts,
+            availableAt: now,
+            lockedAt: null,
+            lockedBy: null,
+            lastErrorCode: null,
+            completedAt: null,
+            updatedAt: now,
+          },
+        });
+      } else {
+        await transaction.suggestionJob.create({
+          data: {
+            id: randomUUID(),
+            intakeId: parsedInput.intakeId,
+            status: 'queued',
+            generation,
+            inputHash,
+            input: json(parsedInput),
+            attempts: 0,
+            maxAttempts,
+            availableAt: now,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+      }
+      await transaction.insight.deleteMany({
+        where: { intakeId: parsedInput.intakeId, generator: 'model' },
+      });
+      return true;
+    });
+  }
+
+  async getSuggestionJobState(intakeId: string): Promise<SuggestionJobState> {
+    const job = await this.prisma.suggestionJob.findUnique({
+      where: { intakeId },
+      select: { status: true, generation: true },
+    });
+    if (!job) return { status: 'not_requested', generation: null };
+    const statuses = {
+      queued: 'queued',
+      retry: 'queued',
+      processing: 'processing',
+      succeeded: 'ready',
+      failed: 'failed',
+    } as const;
+    return { status: statuses[job.status], generation: job.generation };
+  }
+
+  async claimSuggestionJob(
+    workerId: string,
+    staleAfterMs: number,
+  ): Promise<ClaimedSuggestionJob | null> {
+    return this.prisma.$transaction(async (transaction) => {
+      await transaction.$executeRaw(Prisma.sql`
+        UPDATE "suggestion_jobs"
+        SET
+          "status" = 'failed'::"AnalysisJobStatus",
+          "locked_at" = NULL,
+          "locked_by" = NULL,
+          "last_error_code" = 'JOB_LEASE_EXHAUSTED',
+          "completed_at" = NOW(),
+          "updated_at" = NOW()
+        WHERE
+          "status" = 'processing'::"AnalysisJobStatus"
+          AND "locked_at" <= NOW() - (${staleAfterMs} * INTERVAL '1 millisecond')
+          AND "attempts" >= "max_attempts"
+      `);
+
+      const rows = await transaction.$queryRaw<ClaimedSuggestionJobRow[]>(Prisma.sql`
+        WITH candidate AS (
+          SELECT "id"
+          FROM "suggestion_jobs"
+          WHERE
+            "attempts" < "max_attempts"
+            AND (
+              (
+                "status" IN (
+                  'queued'::"AnalysisJobStatus",
+                  'retry'::"AnalysisJobStatus"
+                )
+                AND "available_at" <= NOW()
+              )
+              OR (
+                "status" = 'processing'::"AnalysisJobStatus"
+                AND "locked_at" <= NOW() - (${staleAfterMs} * INTERVAL '1 millisecond')
+              )
+            )
+          ORDER BY "available_at", "created_at"
+          FOR UPDATE SKIP LOCKED
+          LIMIT 1
+        )
+        UPDATE "suggestion_jobs" AS job
+        SET
+          "status" = 'processing'::"AnalysisJobStatus",
+          "attempts" = job."attempts" + 1,
+          "locked_at" = NOW(),
+          "locked_by" = ${workerId},
+          "updated_at" = NOW()
+        FROM candidate
+        WHERE job."id" = candidate."id"
+        RETURNING
+          job."id",
+          job."intake_id",
+          job."generation",
+          job."input",
+          job."attempts",
+          job."max_attempts"
+      `);
+      const row = rows[0];
+      if (!row) return null;
+      const parsedInput = groundedSuggestionInputSchema.safeParse(row.input);
+      if (!parsedInput.success || parsedInput.data.intakeId !== row.intake_id) {
+        await transaction.suggestionJob.update({
+          where: { id: row.id },
+          data: {
+            status: 'failed',
+            lockedAt: null,
+            lockedBy: null,
+            lastErrorCode: 'SUGGESTION_INPUT_INVALID',
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          },
+        });
+        return null;
+      }
+      return {
+        ...parsedInput.data,
+        jobId: row.id,
+        generation: row.generation,
+        attempt: row.attempts,
+        maxAttempts: row.max_attempts,
+      };
+    });
+  }
+
+  async completeSuggestionJob(
+    jobId: string,
+    generation: number,
+    insights: Insight[],
+  ): Promise<boolean> {
+    return this.prisma.$transaction(async (transaction) => {
+      const rows = await transaction.$queryRaw<LockedSuggestionJobRow[]>(Prisma.sql`
+        SELECT "id", "intake_id", "generation", "input_hash", "status"
+        FROM "suggestion_jobs"
+        WHERE "id" = ${jobId}::uuid
+        FOR UPDATE
+      `);
+      const job = rows[0];
+      if (!job || job.generation !== generation || job.status !== 'processing') return false;
+
+      await transaction.insight.deleteMany({
+        where: { intakeId: job.intake_id, generator: 'model' },
+      });
+      const modelInsights = insights.filter((insight) => insight.generator === 'model');
+      if (modelInsights.length > 0) {
+        await transaction.insight.createMany({
+          data: modelInsights.map((insight) => ({
+            id: insight.id,
+            intakeId: job.intake_id,
+            actionId: insight.actionId ?? null,
+            type: insight.type,
+            kind: insight.kind,
+            generator: insight.generator,
+            priority: insight.priority,
+            title: insight.title,
+            body: insight.body,
+            evidence: json(insight.evidence),
+            createdAt: new Date(insight.createdAt),
+          })),
+        });
+      }
+      await transaction.suggestionJob.update({
+        where: { id: job.id },
+        data: {
+          status: 'succeeded',
+          lockedAt: null,
+          lockedBy: null,
+          lastErrorCode: null,
+          completedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+      return true;
+    });
+  }
+
+  async rescheduleSuggestionJob(
+    jobId: string,
+    generation: number,
+    delayMs: number,
+    errorCode: string,
+  ): Promise<void> {
+    await this.prisma.suggestionJob.updateMany({
+      where: { id: jobId, generation },
+      data: {
+        status: 'retry',
+        availableAt: new Date(Date.now() + delayMs),
+        lockedAt: null,
+        lockedBy: null,
+        lastErrorCode: errorCode,
+        updatedAt: new Date(),
+      },
+    });
+  }
+
+  async failSuggestionJob(jobId: string, generation: number, errorCode: string): Promise<void> {
+    await this.prisma.suggestionJob.updateMany({
+      where: { id: jobId, generation },
+      data: {
+        status: 'failed',
+        lockedAt: null,
+        lockedBy: null,
+        lastErrorCode: errorCode,
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      },
     });
   }
 

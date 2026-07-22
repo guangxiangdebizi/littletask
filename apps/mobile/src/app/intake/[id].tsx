@@ -33,6 +33,8 @@ export default function IntakeResultScreen() {
     queryKey: ['insights', intakeId],
     queryFn: () => getInsights(intakeId ?? ''),
     enabled: Boolean(intakeId && hasExecutedAction),
+    refetchInterval: (query) =>
+      ['queued', 'processing'].includes(query.state.data?.generationStatus ?? '') ? 1_000 : false,
   });
   const activityQuery = useQuery({
     queryKey: ['activity', intakeId],
@@ -170,11 +172,16 @@ export default function IntakeResultScreen() {
           </View>
           {insightsQuery.isPending ? (
             <Text style={styles.loadingInsights}>正在整理建议…</Text>
-          ) : insightsQuery.data && insightsQuery.data.length > 0 ? (
-            insightsQuery.data.map((insight) => <InsightRow insight={insight} key={insight.id} />)
+          ) : insightsQuery.data && insightsQuery.data.items.length > 0 ? (
+            insightsQuery.data.items.map((insight) => (
+              <InsightRow insight={insight} key={insight.id} />
+            ))
           ) : (
             <Text style={styles.loadingInsights}>当前没有额外建议。</Text>
           )}
+          {['queued', 'processing'].includes(insightsQuery.data?.generationStatus ?? '') ? (
+            <Text style={styles.loadingInsights}>AI 正在基于已验证证据补充建议…</Text>
+          ) : null}
         </View>
       ) : null}
 
