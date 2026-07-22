@@ -23,9 +23,9 @@ const idParameter = {
   schema: { type: 'string', format: 'uuid' },
 } as const;
 
-function componentSchema(schema: Parameters<typeof z.toJSONSchema>[0]) {
-  const { $schema, ...definition } = z.toJSONSchema(schema);
-  void $schema;
+function componentSchema(schema: z.ZodType) {
+  const { ['~standard']: standardMetadata, ...definition } = z.toJSONSchema(schema);
+  void standardMetadata;
   return definition;
 }
 

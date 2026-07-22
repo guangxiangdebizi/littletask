@@ -108,7 +108,7 @@ export function deriveInsights(input: InsightDerivationInput, runtime: Runtime):
   const insights: Insight[] = [];
   const seen = new Set<string>();
 
-  const add = (value: Omit<Insight, 'id' | 'intakeId' | 'createdAt'>) => {
+  const add = (value: Omit<Insight, 'id' | 'intakeId' | 'generator' | 'createdAt'>) => {
     const key = `${value.actionId ?? 'intake'}:${value.type}:${value.title}`;
     if (seen.has(key)) return;
     seen.add(key);

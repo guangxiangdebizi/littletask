@@ -114,6 +114,7 @@ describe('deriveInsights', () => {
     expect(insights.map((item) => item.type)).toEqual(
       expect.arrayContaining(['schedule_conflict', 'meeting_preparation', 'reply_suggestion']),
     );
+    expect(insights.every((item) => item.generator === 'rules')).toBe(true);
     const conflict = insights.find((item) => item.type === 'schedule_conflict');
     expect(conflict).toMatchObject({ kind: 'observation', priority: 'high' });
     expect(conflict?.evidence[0]).toMatchObject({

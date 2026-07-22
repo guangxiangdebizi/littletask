@@ -32,7 +32,7 @@ export const intakeRoutes: FastifyPluginAsync = async (app) => {
       app.appConfig.RATE_LIMIT_REQUESTS,
       app.appConfig.RATE_LIMIT_WINDOW_MS,
     );
-    if (request.method === 'POST' && request.routeOptions.url.endsWith('/intakes')) {
+    if (request.method === 'POST' && request.routeOptions.url?.endsWith('/intakes') === true) {
       app.rateLimiter.consume(
         `upload:${request.auth.deviceId}`,
         app.appConfig.RATE_LIMIT_UPLOADS,

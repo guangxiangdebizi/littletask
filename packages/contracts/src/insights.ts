@@ -44,6 +44,7 @@ export const insightSchema = z.object({
 
 export type Insight = z.infer<typeof insightSchema>;
 export type InsightEvidence = z.infer<typeof insightEvidenceSchema>;
+export type InsightType = z.infer<typeof insightTypeSchema>;
 
 export const insightGenerationStatusSchema = z.enum([
   'not_requested',
