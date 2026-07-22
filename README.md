@@ -90,6 +90,10 @@ Start `corepack pnpm dev:worker` in another terminal. See [docs/persistence.md](
 
 Native execution is never performed by the Web acceptance build. See [docs/native-execution.md](./docs/native-execution.md) for permission timing, confirmation ordering, duplicate/conflict checks, crash recovery, and the physical-device test checklist.
 
+EAS development, preview, and production profiles are committed for the iOS release path. See
+[docs/ios-release.md](./docs/ios-release.md) for one-time project linking, TestFlight commands, and
+the physical-device release gates.
+
 History returns compact summaries through an opaque cursor rather than downloading every intake. Each intake exposes a provenance timeline for AI revisions, user edits and confirmations, and device results. The privacy page shows retained counts, deletes a single intake, all user records, or the anonymous account, and separately clears the local execution ledger. Grounded model advice runs in a separate generation-safe queue and can only cite the server's bounded evidence registry. See [docs/history-and-privacy.md](./docs/history-and-privacy.md) and [docs/grounded-insights.md](./docs/grounded-insights.md).
 
 The API stores only anonymous device-token hashes, applies ownership at every store boundary, rate-limits registration/uploads/general traffic separately, and exposes bounded-label Prometheus metrics. See [docs/security-and-observability.md](./docs/security-and-observability.md).

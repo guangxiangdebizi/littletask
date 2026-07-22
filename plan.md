@@ -20,6 +20,7 @@
 - [x] 完成证据约束的异步 AI 建议。
 - [x] 完成匿名设备鉴权、逐用户数据隔离、账户删除、请求限流和基础指标。
 - [x] 完成模型响应 ID / Token 用量审计和只走真实后端链路的脱敏 AI eval。
+- [x] 完成 EAS development / preview / production 配置、iOS 隐私清单和发布手册。
 - [ ] 完成 EAS 真机测试和 TestFlight。
 - [ ] 完成 `manbaout.com` Nginx / SSL / PM2 部署。
 
