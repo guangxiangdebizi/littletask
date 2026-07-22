@@ -42,6 +42,8 @@ apps/api           Fastify API, Prisma schema, migrations, and AI worker
 packages/contracts Shared Zod API and Action Card contracts
 packages/domain    Framework-independent state and insight rules
 infra/pm2          Separate production API and worker process definitions
+infra/deploy       Immutable release, rollback, backup, and host setup scripts
+infra/nginx        manbaout.com Web/API/Webmail routing and bounded rate limits
 ```
 
 ## Local development
@@ -101,6 +103,10 @@ The API stores only anonymous device-token hashes, applies ownership at every st
 The real-provider eval harness renders synthetic chat screenshots in memory, exercises the complete
 authenticated upload/worker/poll flow, and deletes its anonymous account afterward. See
 [docs/ai-evals.md](./docs/ai-evals.md).
+
+Production uses an isolated Node 22 runtime, PostgreSQL container, low-privilege PM2 children,
+atomic Git-SHA releases, Nginx/SSL, daily database dumps, and validated rollback while preserving
+the existing Roundcube service at `/webmail/`. See [docs/deployment.md](./docs/deployment.md).
 
 Run the complete local quality gate:
 

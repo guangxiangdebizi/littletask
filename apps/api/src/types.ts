@@ -185,5 +185,6 @@ export interface IntakeStore {
   rescheduleAnalysisJob(jobId: string, delayMs: number, errorCode: string): Promise<void>;
   failAnalysisJob(jobId: string, errorCode: string, message: string): Promise<void>;
   recordModelRun(run: ModelRunRecord): Promise<void>;
+  healthCheck(): Promise<void>;
   close(): Promise<void>;
 }

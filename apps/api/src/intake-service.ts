@@ -98,6 +98,10 @@ export class IntakeService {
     this.options = { ...defaultOptions, ...options };
   }
 
+  async checkReadiness(): Promise<void> {
+    await this.store.healthCheck();
+  }
+
   async create(userId: string, input: CreateIntakeInput): Promise<Intake> {
     const timestamp = new Date().toISOString();
     const intake: Intake = {

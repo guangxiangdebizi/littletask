@@ -692,6 +692,8 @@ export class InMemoryIntakeStore implements IntakeStore {
     this.#modelRuns.push(structuredClone(run));
   }
 
+  async healthCheck(): Promise<void> {}
+
   async close(): Promise<void> {}
 
   private ownsAction(userId: string, actionId: string): boolean {

@@ -10,10 +10,11 @@ import type {
   InsightResponse,
 } from '@littletask/contracts';
 import type { FastifyInstance, InjectOptions } from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { buildApp } from './app';
 import { loadConfig } from './config';
+import { InMemoryIntakeStore } from './stores/in-memory-store';
 
 async function authenticatedInject(app: FastifyInstance) {
   const session = (
@@ -51,6 +52,26 @@ function multipartScreenshot(): { payload: Buffer; contentType: string } {
 }
 
 describe('LittleTask API', () => {
+  it('reports readiness only while the persistence dependency is reachable', async () => {
+    const store = new InMemoryIntakeStore();
+    const app = await buildApp({
+      config: loadConfig({ NODE_ENV: 'test', AI_PROVIDER: 'fake', LOG_LEVEL: 'silent' }),
+      logger: false,
+      store,
+    });
+
+    const ready = await app.inject({ method: 'GET', url: '/api/health/ready' });
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json()).toEqual({ status: 'ready', provider: 'fake' });
+
+    vi.spyOn(store, 'healthCheck').mockRejectedValueOnce(new Error('database unavailable'));
+    const unavailable = await app.inject({ method: 'GET', url: '/api/health/ready' });
+    expect(unavailable.statusCode).toBe(503);
+    expect(unavailable.json()).toEqual({ status: 'unavailable' });
+
+    await app.close();
+  });
+
   it('requires a device session and isolates every user-owned resource', async () => {
     const app = await buildApp({
       config: loadConfig({ NODE_ENV: 'test', AI_PROVIDER: 'fake', LOG_LEVEL: 'silent' }),

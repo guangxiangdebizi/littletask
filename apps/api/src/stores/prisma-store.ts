@@ -1058,6 +1058,10 @@ export class PrismaIntakeStore implements IntakeStore {
     });
   }
 
+  async healthCheck(): Promise<void> {
+    await this.prisma.$queryRaw`SELECT 1`;
+  }
+
   async close(): Promise<void> {
     await this.prisma.$disconnect();
   }
