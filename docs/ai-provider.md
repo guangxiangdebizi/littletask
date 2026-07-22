@@ -13,8 +13,8 @@ OPENAI_MODEL=gpt-5.6-terra
 OPENAI_REVIEW_MODEL=gpt-5.6-terra
 OPENAI_REASONING_EFFORT=xhigh
 OPENAI_STORE=false
-OPENAI_TIMEOUT_MS=180000
-OPENAI_MAX_RETRIES=2
+OPENAI_TIMEOUT_MS=120000
+OPENAI_MAX_RETRIES=0
 OPENAI_MAX_OUTPUT_TOKENS=16000
 ```
 
@@ -37,6 +37,11 @@ filesystem. Every tool input is validated with Zod before it enters the workspac
 workspace is validated again against the domain contract before Action Cards are persisted. The
 independent review run receives the original image and draft, then rebuilds a corrected workspace
 with the review model.
+
+Provider-side strict constrained decoding is disabled because the compatible gateway stalls on the
+full discriminated Action schema. This does not bypass validation: tool arguments must pass the same
+complete Zod schema inside `workspace.submit`, followed by the domain contract. SDK retries are also
+disabled; the persisted job queue owns bounded retries so a single request cannot outlive its lease.
 
 Screenshot text, notes, prior drafts, and tool output are all marked as untrusted data. Model tool
 calls never mutate a device. Contact and calendar writes remain native iOS operations behind the

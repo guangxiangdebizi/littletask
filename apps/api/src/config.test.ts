@@ -7,9 +7,18 @@ describe('loadConfig', () => {
     const config = loadConfig({ AI_PROVIDER: 'openai', OPENAI_API_KEY: 'test-key' });
     expect(config.AI_PROVIDER).toBe('openai');
     expect(config.OPENAI_STORE).toBe(false);
+    expect(config.OPENAI_TIMEOUT_MS).toBe(120_000);
+    expect(config.OPENAI_MAX_RETRIES).toBe(0);
     expect(() => loadConfig({ AI_PROVIDER: 'openai', OPENAI_API_KEY: '' })).toThrow();
     expect(() =>
       loadConfig({ AI_PROVIDER: 'openai', OPENAI_API_KEY: 'test-key', OPENAI_STORE: 'true' }),
+    ).toThrow();
+    expect(() =>
+      loadConfig({
+        AI_PROVIDER: 'openai',
+        OPENAI_API_KEY: 'test-key',
+        OPENAI_MAX_RETRIES: '1',
+      }),
     ).toThrow();
   });
 

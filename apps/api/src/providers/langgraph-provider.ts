@@ -229,7 +229,9 @@ export class LangGraphAIProvider implements AIProvider {
       reasoning: { effort: this.options.reasoningEffort },
       zdrEnabled: true,
       useResponsesApi: true,
-      supportsStrictToolCalling: true,
+      // The compatible gateway stalls on strict decoding for this union schema;
+      // workspace.submit still applies the complete Zod contract before persistence.
+      supportsStrictToolCalling: false,
       modelKwargs: { parallel_tool_calls: false, tool_choice: 'required' },
       maxTokens: this.options.maxOutputTokens,
       maxRetries: this.options.maxRetries,

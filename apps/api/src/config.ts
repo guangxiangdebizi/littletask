@@ -57,8 +57,8 @@ const environmentSchema = z
     OPENAI_REVIEW_MODEL: z.literal('gpt-5.6-terra').default('gpt-5.6-terra'),
     OPENAI_REASONING_EFFORT: z.literal('xhigh').default('xhigh'),
     OPENAI_STORE: disabledBooleanSchema,
-    OPENAI_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(180_000),
-    OPENAI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
+    OPENAI_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(120_000),
+    OPENAI_MAX_RETRIES: z.literal('0').transform(Number).default(0),
     OPENAI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(1_000).max(100_000).default(16_000),
     AI_NETWORK_ACCESS: z.literal('enabled').default('enabled'),
   })
