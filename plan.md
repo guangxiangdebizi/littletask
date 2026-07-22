@@ -1,9 +1,22 @@
 # LittleTask 产品与交付计划
 
-> 状态：待确认，尚未开始业务实现或服务器部署  
-> 产品形态：iOS App；Web 仅作为本地/云端测试与演示入口  
+> 状态：已确认，正在按阶段实施；尚未进行服务器部署
+> 产品形态：iOS App；Web 仅作为本地/云端测试与演示入口
 > 核心链路：聊天截图 + 补充文字 -> 上下文理解 -> Action Cards -> 用户确认 -> 系统执行 -> 洞察与建议
 > AI 决策：通过 `https://api.hostcentral.cc` 的 OpenAI-compatible Responses API 接入 GPT-5.6 Terra
+
+## 实施进度
+
+- [x] 创建 GitHub 公开仓库：[`guangxiangdebizi/littletask`](https://github.com/guangxiangdebizi/littletask)。
+- [x] 初始化 TypeScript monorepo、CI、共享契约、领域状态机和安全边界。
+- [x] 完成 React Native / Expo Web 可运行验收客户端及 Fake AI 端到端链路。
+- [x] 完成 Fastify API、上传校验、确认门禁、幂等执行接口和历史接口。
+- [ ] 接入 PostgreSQL 持久化与可恢复异步任务队列。
+- [ ] 接入 GPT-5.6 Terra 多模态分析与独立复核，并完成网关兼容性测试。
+- [ ] 接入 iOS Contacts / Calendar 原生执行与本地冲突、重复项检查。
+- [ ] 完成设备测试、TestFlight、`manbaout.com` Nginx / SSL / PM2 部署。
+
+当前提交先建立可复现的垂直切片；后续阶段按 GitHub Roadmap Issues 逐项实现，不用占位实现冒充已接通能力。
 
 ## 1. 我们要做的产品
 
