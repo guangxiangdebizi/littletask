@@ -68,7 +68,7 @@ export const intakeRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const intake = app.intakeService.create({
+    const intake = await app.intakeService.create({
       image,
       mimeType,
       originalName,
@@ -85,10 +85,10 @@ export const intakeRoutes: FastifyPluginAsync = async (app) => {
     app.intakeService.get(request.params.id),
   );
 
-  app.get('/history', async () => ({ items: app.intakeService.list() }));
+  app.get('/history', async () => ({ items: await app.intakeService.list() }));
 
   app.delete<{ Params: IntakeParams }>('/intakes/:id', async (request, reply) => {
-    app.intakeService.delete(request.params.id);
+    await app.intakeService.delete(request.params.id);
     return reply.code(204).send();
   });
 
@@ -112,6 +112,6 @@ export const intakeRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get<{ Params: IntakeParams }>('/intakes/:id/insights', async (request) => ({
-    items: app.intakeService.getInsights(request.params.id),
+    items: await app.intakeService.getInsights(request.params.id),
   }));
 };

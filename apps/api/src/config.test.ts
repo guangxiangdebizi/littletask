@@ -15,4 +15,14 @@ describe('loadConfig', () => {
       loadConfig({ AI_PROVIDER: 'openai', OPENAI_API_KEY: 'test-key', OPENAI_STORE: 'true' }),
     ).toThrow();
   });
+
+  it('requires a database URL for PostgreSQL persistence', () => {
+    expect(() => loadConfig({ PERSISTENCE_PROVIDER: 'postgres', DATABASE_URL: '' })).toThrow();
+    expect(
+      loadConfig({
+        PERSISTENCE_PROVIDER: 'postgres',
+        DATABASE_URL: 'postgresql://littletask:littletask@localhost:5432/littletask',
+      }).PERSISTENCE_PROVIDER,
+    ).toBe('postgres');
+  });
 });

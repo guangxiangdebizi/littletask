@@ -22,7 +22,7 @@ The project is in active development. The first vertical slice is available with
 - Simulate execution in the Web acceptance build
 - Receive deterministic follow-up insights
 
-The GPT-5.6 Terra provider is implemented behind an environment switch with stateless analysis and review requests. A rotated runtime credential is still required for the live gateway compatibility check. PostgreSQL persistence and native Contacts/Calendar execution are the next implementation stages. The full product and delivery plan is documented in [plan.md](./plan.md).
+The GPT-5.6 Terra provider is implemented behind an environment switch with stateless analysis and review requests. PostgreSQL now persists the complete intake/action audit trail and feeds a restart-safe standalone analysis worker. A rotated runtime credential is still required for the live gateway compatibility check; native Contacts/Calendar execution is the next implementation stage. The full product and delivery plan is documented in [plan.md](./plan.md).
 
 ## Stack
 
@@ -35,9 +35,10 @@ The GPT-5.6 Terra provider is implemented behind an environment switch with stat
 
 ```text
 apps/mobile        Expo React app for iOS and Web acceptance
-apps/api           Fastify API and current fake analysis pipeline
+apps/api           Fastify API, Prisma schema, migrations, and analysis worker
 packages/contracts Shared Zod API and Action Card contracts
 packages/domain    Framework-independent state and insight rules
+infra/pm2          Separate production API and worker process definitions
 ```
 
 ## Local development
@@ -74,6 +75,16 @@ corepack pnpm dev:mobile
 
 Press `w` in Expo to open the Web acceptance build. The default API URL is `http://127.0.0.1:3100/api/v1`; override it with `EXPO_PUBLIC_API_URL` when testing on a physical device or cloud environment.
 
+The default `memory` persistence mode needs no database and drains fake-analysis jobs inside the API process. To run the durable API/worker topology, set `PERSISTENCE_PROVIDER=postgres` in `.env`, then run:
+
+```bash
+docker compose up -d postgres
+corepack pnpm db:migrate:deploy
+corepack pnpm dev:api
+```
+
+Start `corepack pnpm dev:worker` in another terminal. See [docs/persistence.md](./docs/persistence.md) for the queue lifecycle, isolated PostgreSQL integration suite, and PM2 process topology.
+
 Run the complete local quality gate:
 
 ```bash
@@ -84,7 +95,7 @@ corepack pnpm check
 
 The committed configuration defaults to `AI_PROVIDER=fake`. To enable real inference, set `AI_PROVIDER=openai` and inject `OPENAI_API_KEY` at runtime. The provider sends the screenshot twice through the OpenAI-compatible Responses API: first for extraction, then for an independent evidence review. It uses `gpt-5.6-terra`, `xhigh` reasoning, Structured Outputs, original-detail vision input, and `store: false` on every request.
 
-HEIC screenshots are converted to high-quality JPEG in memory before inference. Original screenshot bytes are not persisted by the current API. See [docs/ai-provider.md](./docs/ai-provider.md) for the request contract and gateway smoke-test checklist.
+HEIC screenshots are converted to high-quality JPEG in memory before inference. In PostgreSQL mode, original screenshot bytes are retained only in the pending job and cleared after success or permanent failure; history retains only image metadata and a SHA-256 hash. See [docs/ai-provider.md](./docs/ai-provider.md) for the request contract and gateway smoke-test checklist.
 
 ## Security
 

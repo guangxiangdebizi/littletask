@@ -13,7 +13,13 @@ import {
 } from '@littletask/contracts';
 import { assertActionTransition, deriveInsights } from '@littletask/domain';
 
-import type { AIProvider, AnalyzeInput, IntakeStore } from './types';
+import type {
+  AIProvider,
+  AnalyzeInput,
+  ClaimedAnalysisJob,
+  IntakeStore,
+  ModelRunRecord,
+} from './types';
 
 export class DomainError extends Error {
   constructor(
@@ -29,13 +35,49 @@ interface CreateIntakeInput extends AnalyzeInput {
   originalName: string | null;
 }
 
+interface IntakeServiceOptions {
+  inlineWorker: boolean;
+  maxJobAttempts: number;
+  jobLeaseMs: number;
+  providerName: string;
+  analysisModel: string;
+  reviewModel: string;
+  reasoningEffort: string;
+  promptVersion: string;
+  schemaVersion: string;
+}
+
+const defaultOptions: IntakeServiceOptions = {
+  inlineWorker: true,
+  maxJobAttempts: 3,
+  jobLeaseMs: 5 * 60_000,
+  providerName: 'fake',
+  analysisModel: 'fake-analysis-v1',
+  reviewModel: 'fake-review-v1',
+  reasoningEffort: 'none',
+  promptVersion: '2026-07-22.1',
+  schemaVersion: '1',
+};
+
+const retryableAnalysisErrors = new Set([
+  'MODEL_GATEWAY_ERROR',
+  'MODEL_GATEWAY_UNAVAILABLE',
+  'MODEL_RATE_LIMITED',
+]);
+
 export class IntakeService {
+  private readonly options: IntakeServiceOptions;
+  private inlineDrain: Promise<void> | null = null;
+
   constructor(
     private readonly store: IntakeStore,
     private readonly provider: AIProvider,
-  ) {}
+    options: Partial<IntakeServiceOptions> = {},
+  ) {
+    this.options = { ...defaultOptions, ...options };
+  }
 
-  create(input: CreateIntakeInput): Intake {
+  async create(input: CreateIntakeInput): Promise<Intake> {
     const timestamp = new Date().toISOString();
     const intake: Intake = {
       id: randomUUID(),
@@ -60,31 +102,31 @@ export class IntakeService {
       updatedAt: timestamp,
     };
 
-    this.store.create(intake);
-    void this.analyze(intake.id, input);
+    await this.store.create(intake, input, this.options.maxJobAttempts);
+    if (this.options.inlineWorker) this.scheduleInlineWorker();
     return intake;
   }
 
-  get(id: string): Intake {
-    const intake = this.store.get(id);
+  async get(id: string): Promise<Intake> {
+    const intake = await this.store.get(id);
     if (!intake) {
       throw new DomainError('INTAKE_NOT_FOUND', 'Intake not found', 404);
     }
     return intake;
   }
 
-  list(): Intake[] {
+  list(): Promise<Intake[]> {
     return this.store.list();
   }
 
-  delete(id: string): void {
-    if (!this.store.delete(id)) {
+  async delete(id: string): Promise<void> {
+    if (!(await this.store.delete(id))) {
       throw new DomainError('INTAKE_NOT_FOUND', 'Intake not found', 404);
     }
   }
 
-  patchAction(actionId: string, request: ActionPatchRequest): ActionCard {
-    const { intake, actionIndex, action } = this.findAction(actionId);
+  async patchAction(actionId: string, request: ActionPatchRequest): Promise<ActionCard> {
+    const { intake, actionIndex, action } = await this.findAction(actionId);
     if (!['draft', 'needs_input', 'ready'].includes(action.status)) {
       throw new DomainError('ACTION_LOCKED', 'Confirmed actions can no longer be edited', 409);
     }
@@ -102,28 +144,48 @@ export class IntakeService {
     });
     const actions = [...intake.actions];
     actions[actionIndex] = updated;
-    this.store.replace({ ...intake, actions, updatedAt: updated.updatedAt });
+    await this.store.replace({ ...intake, actions, updatedAt: updated.updatedAt }, 'user');
     return updated;
   }
 
-  confirmAction(actionId: string, expectedRevision: number, idempotencyKey: string): ActionCard {
-    const previousActionId = this.store.getConfirmation(idempotencyKey);
-    if (previousActionId) {
-      if (previousActionId !== actionId) {
-        throw new DomainError(
-          'IDEMPOTENCY_CONFLICT',
-          'Idempotency key belongs to another action',
-          409,
-        );
-      }
-      return this.findAction(actionId).action;
+  async confirmAction(
+    actionId: string,
+    expectedRevision: number,
+    idempotencyKey: string,
+  ): Promise<ActionCard> {
+    const previousActionId = await this.store.getConfirmation(idempotencyKey);
+    if (previousActionId && previousActionId !== actionId) {
+      throw new DomainError(
+        'IDEMPOTENCY_CONFLICT',
+        'Idempotency key belongs to another action',
+        409,
+      );
     }
 
-    const { intake, actionIndex, action } = this.findAction(actionId);
+    const { intake, actionIndex, action } = await this.findAction(actionId);
+    if (
+      previousActionId &&
+      ['confirmed', 'executing', 'succeeded', 'failed'].includes(action.status)
+    ) {
+      return action;
+    }
     if (action.revision !== expectedRevision) {
       throw new DomainError('ACTION_REVISION_CONFLICT', 'Action revision is stale', 409);
     }
     assertActionTransition(action.status, 'confirmed');
+
+    const storedActionId = await this.store.rememberConfirmation(
+      idempotencyKey,
+      actionId,
+      action.revision,
+    );
+    if (storedActionId !== actionId) {
+      throw new DomainError(
+        'IDEMPOTENCY_CONFLICT',
+        'Idempotency key belongs to another action',
+        409,
+      );
+    }
 
     const updated = actionCardSchema.parse({
       ...action,
@@ -132,13 +194,12 @@ export class IntakeService {
     });
     const actions = [...intake.actions];
     actions[actionIndex] = updated;
-    this.store.replace({ ...intake, actions, updatedAt: updated.updatedAt });
-    this.store.rememberConfirmation(idempotencyKey, actionId);
+    await this.store.replace({ ...intake, actions, updatedAt: updated.updatedAt });
     return updated;
   }
 
-  reportExecution(actionId: string, request: ExecutionResultRequest): ActionCard {
-    const confirmedActionId = this.store.getConfirmation(request.idempotencyKey);
+  async reportExecution(actionId: string, request: ExecutionResultRequest): Promise<ActionCard> {
+    const confirmedActionId = await this.store.getConfirmation(request.idempotencyKey);
     if (confirmedActionId !== actionId) {
       throw new DomainError(
         'ACTION_NOT_CONFIRMED',
@@ -147,13 +208,27 @@ export class IntakeService {
       );
     }
 
-    const { intake, actionIndex, action } = this.findAction(actionId);
-    if (action.status === request.status) {
-      return action;
+    const { intake, actionIndex, action } = await this.findAction(actionId);
+    const recordedActionId = await this.store.recordExecution({
+      actionId,
+      idempotencyKey: request.idempotencyKey,
+      status: request.status,
+      ...(request.nativeRecordRef === undefined
+        ? {}
+        : { nativeRecordRef: request.nativeRecordRef }),
+      ...(request.errorMessage === undefined ? {} : { errorMessage: request.errorMessage }),
+    });
+    if (recordedActionId !== actionId) {
+      throw new DomainError(
+        'IDEMPOTENCY_CONFLICT',
+        'Idempotency key belongs to another action execution',
+        409,
+      );
     }
+    if (action.status === request.status) return action;
+
     assertActionTransition(action.status, 'executing');
     assertActionTransition('executing', request.status);
-
     const updated = actionCardSchema.parse({
       ...action,
       status: request.status,
@@ -162,40 +237,114 @@ export class IntakeService {
     const actions = [...intake.actions];
     actions[actionIndex] = updated;
     const nextIntake = { ...intake, actions, updatedAt: updated.updatedAt };
-    this.store.replace(nextIntake);
-    this.store.setInsights(
+    await this.store.replace(nextIntake);
+    await this.store.setInsights(
       intake.id,
       deriveInsights(intake.id, actions, { createId: randomUUID, now: () => new Date() }),
     );
     return updated;
   }
 
-  getInsights(intakeId: string) {
-    this.get(intakeId);
+  async getInsights(intakeId: string) {
+    await this.get(intakeId);
     return this.store.getInsights(intakeId);
   }
 
-  private async analyze(id: string, input: AnalyzeInput): Promise<void> {
+  async processNextJob(workerId: string, staleAfterMs = this.options.jobLeaseMs): Promise<boolean> {
+    const job = await this.store.claimAnalysisJob(workerId, staleAfterMs);
+    if (!job) return false;
+
     try {
-      const queued = this.get(id);
-      this.store.replace({ ...queued, status: 'processing', updatedAt: new Date().toISOString() });
-      const draft = await this.provider.analyze(input);
-      const reviewed = await this.provider.review(input, draft);
-      const processing = this.get(id);
-      this.store.replace(this.materializeAnalysis(processing, reviewed));
-    } catch (error) {
-      const intake = this.store.get(id);
-      if (!intake) return;
-      this.store.replace({
-        ...intake,
-        status: 'failed',
-        error: {
-          code: 'ANALYSIS_FAILED',
-          message: error instanceof Error ? error.message : 'Analysis failed',
-        },
+      const current = await this.get(job.intakeId);
+      if (current.status === 'ready') {
+        await this.store.completeAnalysisJob(job.jobId);
+        return true;
+      }
+
+      await this.store.replace({
+        ...current,
+        status: 'processing',
+        error: null,
         updatedAt: new Date().toISOString(),
       });
+      const draft = await this.runModelStage(job, 'analysis', () => this.provider.analyze(job));
+      const reviewed = await this.runModelStage(job, 'review', () =>
+        this.provider.review(job, draft),
+      );
+      const processing = await this.get(job.intakeId);
+      await this.store.replace(this.materializeAnalysis(processing, reviewed), 'ai');
+      await this.store.completeAnalysisJob(job.jobId);
+    } catch (error) {
+      const code = this.errorCode(error);
+      if (retryableAnalysisErrors.has(code) && job.attempt < job.maxAttempts) {
+        const delayMs = Math.min(5 * 60_000, 1_000 * 2 ** (job.attempt - 1));
+        await this.store.rescheduleAnalysisJob(job.jobId, delayMs, code);
+      } else {
+        await this.store.failAnalysisJob(job.jobId, code, this.safeAnalysisMessage(error));
+      }
     }
+    return true;
+  }
+
+  private scheduleInlineWorker(): void {
+    if (this.inlineDrain) return;
+    this.inlineDrain = this.drainInlineJobs()
+      .catch(() => undefined)
+      .finally(() => {
+        this.inlineDrain = null;
+      });
+  }
+
+  private async drainInlineJobs(): Promise<void> {
+    while (await this.processNextJob('inline-development-worker')) {
+      // Drain all immediately available jobs; delayed retries are left for the next worker tick.
+    }
+  }
+
+  private async runModelStage<T>(
+    job: ClaimedAnalysisJob,
+    stage: 'analysis' | 'review',
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const startedAt = new Date();
+    const started = Date.now();
+    try {
+      const result = await run();
+      await this.recordModelRun(job, stage, 'succeeded', startedAt, started, null);
+      return result;
+    } catch (error) {
+      try {
+        await this.recordModelRun(job, stage, 'failed', startedAt, started, this.errorCode(error));
+      } catch {
+        // Preserve the provider error; queue failure handling remains authoritative.
+      }
+      throw error;
+    }
+  }
+
+  private recordModelRun(
+    job: ClaimedAnalysisJob,
+    stage: 'analysis' | 'review',
+    status: ModelRunRecord['status'],
+    startedAt: Date,
+    started: number,
+    errorCode: string | null,
+  ): Promise<void> {
+    return this.store.recordModelRun({
+      id: randomUUID(),
+      intakeId: job.intakeId,
+      stage,
+      status,
+      provider: this.options.providerName,
+      model: stage === 'analysis' ? this.options.analysisModel : this.options.reviewModel,
+      reasoningEffort: this.options.reasoningEffort,
+      promptVersion: this.options.promptVersion,
+      schemaVersion: this.options.schemaVersion,
+      durationMs: Math.max(0, Date.now() - started),
+      errorCode,
+      startedAt,
+      completedAt: new Date(),
+    });
   }
 
   private materializeAnalysis(intake: Intake, draft: AnalysisDraft): Intake {
@@ -231,12 +380,12 @@ export class IntakeService {
     };
   }
 
-  private findAction(actionId: string): {
+  private async findAction(actionId: string): Promise<{
     intake: Intake;
     actionIndex: number;
     action: ActionCard;
-  } {
-    for (const intake of this.store.list()) {
+  }> {
+    for (const intake of await this.store.list()) {
       const actionIndex = intake.actions.findIndex((candidate) => candidate.id === actionId);
       if (actionIndex >= 0) {
         const action = intake.actions[actionIndex];
@@ -255,5 +404,26 @@ export class IntakeService {
       case 'update_contact':
         return updateContactPayloadSchema.parse(payload);
     }
+  }
+
+  private errorCode(error: unknown): string {
+    if (typeof error === 'object' && error !== null && 'code' in error) {
+      const code = String(error.code);
+      if (/^[A-Z][A-Z0-9_]{1,79}$/.test(code)) return code;
+    }
+    return 'ANALYSIS_FAILED';
+  }
+
+  private safeAnalysisMessage(error: unknown): string {
+    const code = this.errorCode(error);
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'message' in error &&
+      code.startsWith('MODEL_')
+    ) {
+      return String(error.message).slice(0, 500);
+    }
+    return 'Analysis failed during validation or persistence';
   }
 }

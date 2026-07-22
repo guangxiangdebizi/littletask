@@ -1,6 +1,6 @@
 # LittleTask 产品与交付计划
 
-> 状态：已确认，正在按阶段实施；尚未进行服务器部署
+> 状态：阶段 2 持续实施中；持久化任务队列已完成，尚未进行服务器部署
 > 产品形态：iOS App；Web 仅作为本地/云端测试与演示入口
 > 核心链路：聊天截图 + 补充文字 -> 上下文理解 -> Action Cards -> 用户确认 -> 系统执行 -> 洞察与建议
 > AI 决策：通过 `https://api.hostcentral.cc` 的 OpenAI-compatible Responses API 接入 GPT-5.6 Terra
@@ -11,11 +11,13 @@
 - [x] 初始化 TypeScript monorepo、CI、共享契约、领域状态机和安全边界。
 - [x] 完成 React Native / Expo Web 可运行验收客户端及 Fake AI 端到端链路。
 - [x] 完成 Fastify API、上传校验、确认门禁、幂等执行接口和历史接口。
-- [ ] 接入 PostgreSQL 持久化与可恢复异步任务队列。
+- [x] 接入 PostgreSQL / Prisma 持久化、可恢复异步任务队列和独立 PM2 worker。
 - [x] 实现 GPT-5.6 Terra 多模态分析、Structured Outputs、独立复核和安全错误边界。
 - [ ] 更换已暴露的测试密钥后，完成真实网关兼容性与质量样例测试。
 - [ ] 接入 iOS Contacts / Calendar 原生执行与本地冲突、重复项检查。
 - [ ] 完成设备测试、TestFlight、`manbaout.com` Nginx / SSL / PM2 部署。
+
+当前持久化模块已用独立 PostgreSQL 测试库验证：API/worker 重启不丢任务、崩溃租约可被新 worker 接管、确认和执行请求可幂等去重、完成或永久失败后临时截图字节会被清除。下一实施模块为 iOS Contacts / Calendar 原生执行、联系人消歧和设备端执行账本。
 
 当前提交先建立可复现的垂直切片；后续阶段按 GitHub Roadmap Issues 逐项实现，不用占位实现冒充已接通能力。
 
@@ -529,10 +531,12 @@ GET    /api/health/ready
 目标命令：
 
 ```bash
-pnpm install
+corepack pnpm install
 docker compose up -d postgres
-pnpm db:migrate
-pnpm dev
+corepack pnpm db:migrate:deploy
+corepack pnpm dev:api
+corepack pnpm dev:worker
+corepack pnpm dev:mobile
 ```
 
 本地启动后提供：
@@ -549,7 +553,7 @@ pnpm dev
 
 ## 13. GitHub 交付
 
-- 创建私有 GitHub repo；
+- 已创建 GitHub 公开仓库 `guangxiangdebizi/littletask`；
 - 使用清晰的主分支和功能分支；
 - 提交 Conventional Commits；
 - 配置 CI workflow；
@@ -557,7 +561,7 @@ pnpm dev
 - 提供架构决策记录和 API 文档；
 - 不提交任何服务器密钥、AI key、证书或真实联系人数据。
 
-是否转为公开仓库由你最终决定；默认先私有。
+当前通过功能分支和 Draft PR 逐模块提交；每完成一个可验收模块即提交并推送，CI 通过后再进入下一模块。
 
 ## 14. 云端部署计划
 
@@ -719,7 +723,7 @@ App Store 上架前必须准备：
 
 ### 阶段 6：GitHub 与云端部署
 
-- 推送 GitHub 私有仓库；
+- 持续推送 GitHub 公开仓库并保持 CI 全绿；
 - 审计 `medicalweb`；
 - 配置 PostgreSQL、PM2、Nginx、SSL；
 - 发布 `manbaout.com` 测试环境；

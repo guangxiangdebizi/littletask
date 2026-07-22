@@ -18,6 +18,16 @@ const environmentSchema = z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),
     WEB_ORIGIN: z.string().default('http://localhost:8081'),
+    PERSISTENCE_PROVIDER: z.enum(['memory', 'postgres']).default('memory'),
+    DATABASE_URL: optionalSecretSchema,
+    JOB_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+    JOB_LEASE_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(60 * 60_000)
+      .default(5 * 60_000),
+    JOB_POLL_MS: z.coerce.number().int().min(100).max(60_000).default(1_000),
     MAX_UPLOAD_BYTES: z.coerce
       .number()
       .int()
@@ -44,6 +54,14 @@ const environmentSchema = z
         code: 'custom',
         message: 'OPENAI_API_KEY is required when AI_PROVIDER=openai',
         path: ['OPENAI_API_KEY'],
+      });
+    }
+
+    if (value.PERSISTENCE_PROVIDER === 'postgres' && !value.DATABASE_URL) {
+      context.addIssue({
+        code: 'custom',
+        message: 'DATABASE_URL is required when PERSISTENCE_PROVIDER=postgres',
+        path: ['DATABASE_URL'],
       });
     }
   });

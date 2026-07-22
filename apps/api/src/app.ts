@@ -4,37 +4,18 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 
 import { loadConfig, type AppConfig } from './config';
-import { DomainError, IntakeService } from './intake-service';
-import { FakeAIProvider } from './providers/fake-provider';
-import { OpenAIProvider } from './providers/openai-provider';
+import { DomainError } from './intake-service';
 import { healthRoutes } from './routes/health';
 import { intakeRoutes } from './routes/intakes';
-import { InMemoryIntakeStore } from './stores/in-memory-store';
-import type { AIProvider } from './types';
+import { createIntakeService } from './runtime';
+import type { AIProvider, IntakeStore } from './types';
 
 export interface BuildAppOptions {
   config?: AppConfig;
   logger?: boolean;
   provider?: AIProvider;
-}
-
-function createAIProvider(config: AppConfig): AIProvider {
-  if (config.AI_PROVIDER === 'fake') return new FakeAIProvider();
-  if (!config.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is required when AI_PROVIDER=openai');
-  }
-
-  return new OpenAIProvider({
-    apiKey: config.OPENAI_API_KEY,
-    baseURL: config.OPENAI_BASE_URL,
-    model: config.OPENAI_MODEL,
-    reviewModel: config.OPENAI_REVIEW_MODEL,
-    reasoningEffort: config.OPENAI_REASONING_EFFORT,
-    store: config.OPENAI_STORE,
-    timeoutMs: config.OPENAI_TIMEOUT_MS,
-    maxRetries: config.OPENAI_MAX_RETRIES,
-    maxOutputTokens: config.OPENAI_MAX_OUTPUT_TOKENS,
-  });
+  store?: IntakeStore;
+  inlineWorker?: boolean;
 }
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
@@ -65,10 +46,14 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     bodyLimit: config.MAX_UPLOAD_BYTES + 128 * 1024,
   });
 
-  const provider = options.provider ?? createAIProvider(config);
-  const store = new InMemoryIntakeStore();
+  const runtime = createIntakeService(config, {
+    ...(options.provider ? { provider: options.provider } : {}),
+    ...(options.store ? { store: options.store } : {}),
+    ...(options.inlineWorker === undefined ? {} : { inlineWorker: options.inlineWorker }),
+  });
   app.decorate('appConfig', config);
-  app.decorate('intakeService', new IntakeService(store, provider));
+  app.decorate('intakeService', runtime.service);
+  app.addHook('onClose', async () => runtime.store.close());
 
   await app.register(cors, {
     origin: config.NODE_ENV === 'development' ? true : config.WEB_ORIGIN,

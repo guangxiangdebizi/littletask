@@ -11,11 +11,15 @@
   "scripts": {
     "dev": "corepack pnpm --parallel --filter @littletask/api --filter @littletask/mobile dev",
     "dev:api": "corepack pnpm --filter @littletask/api dev",
+    "dev:worker": "corepack pnpm --filter @littletask/api dev:worker",
     "dev:mobile": "corepack pnpm --filter @littletask/mobile dev",
+    "db:generate": "corepack pnpm --filter @littletask/api db:generate",
+    "db:migrate:deploy": "corepack pnpm --filter @littletask/api db:migrate:deploy",
     "build": "corepack pnpm -r --if-present build",
     "typecheck": "corepack pnpm -r --if-present typecheck",
     "lint": "eslint apps/api/src packages/contracts/src packages/domain/src && corepack pnpm --filter @littletask/mobile lint",
     "test": "corepack pnpm -r --if-present test",
+    "test:integration": "corepack pnpm --filter @littletask/api test:integration",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "corepack pnpm format:check && corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm build"
