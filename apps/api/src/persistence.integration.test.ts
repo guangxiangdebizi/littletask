@@ -2,8 +2,10 @@ import type {
   ActionCard,
   ActivityEvent,
   DataSummary,
+  DeviceSessionResponse,
   InsightResponse,
 } from '@littletask/contracts';
+import type { FastifyInstance, InjectOptions } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { buildApp } from './app';
@@ -12,6 +14,24 @@ import { createIntakeService } from './runtime';
 import { createPrismaClient, PrismaIntakeStore } from './stores/prisma-store';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
+
+async function createAuthenticatedInject(app: FastifyInstance, token?: string) {
+  const sessionToken =
+    token ??
+    (await app.inject({ method: 'POST', url: '/api/v1/auth/device' })).json<DeviceSessionResponse>()
+      .token;
+  return {
+    token: sessionToken,
+    inject: (options: InjectOptions) =>
+      app.inject({
+        ...options,
+        headers: {
+          authorization: `Bearer ${sessionToken}`,
+          ...options.headers,
+        },
+      }),
+  };
+}
 
 function multipartScreenshot(note = '明天下午三点见，我的新号码是 13800138000。') {
   const boundary = '----littletask-postgres-test-boundary';
@@ -51,7 +71,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
   });
 
   beforeAll(async () => {
-    await prisma.$executeRawUnsafe('TRUNCATE TABLE "intakes" RESTART IDENTITY CASCADE');
+    await prisma.$executeRawUnsafe('TRUNCATE TABLE "users" RESTART IDENTITY CASCADE');
   });
 
   afterAll(async () => {
@@ -60,8 +80,9 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
 
   it('survives API/worker restarts and deduplicates confirmations and executions', async () => {
     const apiBeforeRestart = await buildApp({ config, logger: false, inlineWorker: false });
+    const firstSession = await createAuthenticatedInject(apiBeforeRestart);
     const upload = multipartScreenshot();
-    const created = await apiBeforeRestart.inject({
+    const created = await firstSession.inject({
       method: 'POST',
       url: '/api/v1/intakes',
       headers: { 'content-type': upload.contentType },
@@ -79,7 +100,8 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
     await workerStore.close();
 
     const apiAfterRestart = await buildApp({ config, logger: false, inlineWorker: false });
-    const analyzed = await apiAfterRestart.inject({
+    const secondSession = await createAuthenticatedInject(apiAfterRestart, firstSession.token);
+    const analyzed = await secondSession.inject({
       method: 'GET',
       url: `/api/v1/intakes/${id}`,
     });
@@ -95,7 +117,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
     if (!action) throw new Error('Expected an analyzed action');
     const idempotencyKey = crypto.randomUUID();
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const confirmed = await apiAfterRestart.inject({
+      const confirmed = await secondSession.inject({
         method: 'POST',
         url: `/api/v1/actions/${action.id}/confirm`,
         payload: { expectedRevision: action.revision, idempotencyKey },
@@ -103,7 +125,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
       expect(confirmed.statusCode).toBe(200);
     }
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const executed = await apiAfterRestart.inject({
+      const executed = await secondSession.inject({
         method: 'POST',
         url: `/api/v1/actions/${action.id}/execution-result`,
         payload: {
@@ -126,7 +148,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
     const confirmationKey = crypto.randomUUID();
     const failedExecutionKey = crypto.randomUUID();
     const successfulExecutionKey = crypto.randomUUID();
-    const retryConfirmation = await apiAfterRestart.inject({
+    const retryConfirmation = await secondSession.inject({
       method: 'POST',
       url: `/api/v1/actions/${retryableAction.id}/confirm`,
       payload: {
@@ -135,7 +157,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
       },
     });
     expect(retryConfirmation.statusCode).toBe(200);
-    const failedExecution = await apiAfterRestart.inject({
+    const failedExecution = await secondSession.inject({
       method: 'POST',
       url: `/api/v1/actions/${retryableAction.id}/execution-result`,
       payload: {
@@ -150,7 +172,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
       },
     });
     expect(failedExecution.json<{ status: string }>().status).toBe('failed');
-    const successfulRetry = await apiAfterRestart.inject({
+    const successfulRetry = await secondSession.inject({
       method: 'POST',
       url: `/api/v1/actions/${retryableAction.id}/execution-result`,
       payload: {
@@ -214,12 +236,13 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
     );
 
     const apiSecondRestart = await buildApp({ config, logger: false, inlineWorker: false });
-    const history = await apiSecondRestart.inject({ method: 'GET', url: '/api/v1/history' });
+    const thirdSession = await createAuthenticatedInject(apiSecondRestart, firstSession.token);
+    const history = await thirdSession.inject({ method: 'GET', url: '/api/v1/history' });
     expect(history.statusCode).toBe(200);
     expect(history.json<{ items: Array<{ id: string }> }>().items.map((item) => item.id)).toContain(
       id,
     );
-    const persistedInsights = await apiSecondRestart.inject({
+    const persistedInsights = await thirdSession.inject({
       method: 'GET',
       url: `/api/v1/intakes/${id}/insights`,
     });
@@ -232,7 +255,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
       ]),
     );
 
-    const activity = await apiSecondRestart.inject({
+    const activity = await thirdSession.inject({
       method: 'GET',
       url: `/api/v1/intakes/${id}/activity`,
     });
@@ -245,7 +268,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
       ]),
     );
 
-    const deleted = await apiSecondRestart.inject({
+    const deleted = await thirdSession.inject({
       method: 'DELETE',
       url: `/api/v1/intakes/${id}`,
     });
@@ -266,7 +289,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
     ).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0]);
     expect(
       (
-        await apiSecondRestart.inject({ method: 'GET', url: '/api/v1/data-summary' })
+        await thirdSession.inject({ method: 'GET', url: '/api/v1/data-summary' })
       ).json<DataSummary>(),
     ).toMatchObject({ intakes: 0, actions: 0, executionResults: 0, insights: 0 });
     await apiSecondRestart.close();
@@ -274,8 +297,9 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
 
   it('reclaims a job abandoned by a crashed worker lease', async () => {
     const api = await buildApp({ config, logger: false, inlineWorker: false });
+    const session = await createAuthenticatedInject(api);
     const upload = multipartScreenshot('后天下午再见。');
-    const created = await api.inject({
+    const created = await session.inject({
       method: 'POST',
       url: '/api/v1/intakes',
       headers: { 'content-type': upload.contentType },
@@ -292,7 +316,11 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
     const recoveryStore = new PrismaIntakeStore(createPrismaClient(databaseUrl));
     const recovery = createIntakeService(config, { store: recoveryStore, inlineWorker: false });
     expect(await recovery.service.processNextJob('replacement-worker', 0)).toBe(true);
-    const recovered = await recoveryStore.get(id);
+    const user = await prisma.intake.findUniqueOrThrow({
+      where: { id },
+      select: { userId: true },
+    });
+    const recovered = await recoveryStore.get(user.userId, id);
     expect(recovered?.status).toBe('ready');
     await recoveryStore.close();
 

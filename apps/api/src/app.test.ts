@@ -4,14 +4,30 @@ import type {
   ActionCard,
   ActivityEvent,
   DataSummary,
+  DeviceSessionResponse,
   HistoryPage,
   Insight,
   InsightResponse,
 } from '@littletask/contracts';
+import type { FastifyInstance, InjectOptions } from 'fastify';
 import { describe, expect, it } from 'vitest';
 
 import { buildApp } from './app';
 import { loadConfig } from './config';
+
+async function authenticatedInject(app: FastifyInstance) {
+  const session = (
+    await app.inject({ method: 'POST', url: '/api/v1/auth/device' })
+  ).json<DeviceSessionResponse>();
+  return (options: InjectOptions) =>
+    app.inject({
+      ...options,
+      headers: {
+        authorization: `Bearer ${session.token}`,
+        ...options.headers,
+      },
+    });
+}
 
 function multipartScreenshot(): { payload: Buffer; contentType: string } {
   const boundary = '----littletask-test-boundary';
@@ -35,14 +51,102 @@ function multipartScreenshot(): { payload: Buffer; contentType: string } {
 }
 
 describe('LittleTask API', () => {
+  it('requires a device session and isolates every user-owned resource', async () => {
+    const app = await buildApp({
+      config: loadConfig({ NODE_ENV: 'test', AI_PROVIDER: 'fake', LOG_LEVEL: 'silent' }),
+      logger: false,
+      inlineWorker: false,
+    });
+    const unauthorized = await app.inject({ method: 'GET', url: '/api/v1/history' });
+    expect(unauthorized.statusCode).toBe(401);
+
+    const userA = await authenticatedInject(app);
+    const userB = await authenticatedInject(app);
+    const upload = multipartScreenshot();
+    const created = await userA({
+      method: 'POST',
+      url: '/api/v1/intakes',
+      headers: { 'content-type': upload.contentType },
+      payload: upload.payload,
+    });
+    const { id } = created.json<{ id: string }>();
+    await app.intakeService.processNextJob('auth-isolation-worker');
+    const owned = (await userA({ method: 'GET', url: `/api/v1/intakes/${id}` })).json<{
+      actions: ActionCard[];
+    }>();
+    const action = owned.actions[0];
+    if (!action) throw new Error('Expected a user-owned action');
+
+    expect((await userA({ method: 'GET', url: `/api/v1/intakes/${id}` })).statusCode).toBe(200);
+    expect((await userB({ method: 'GET', url: `/api/v1/intakes/${id}` })).statusCode).toBe(404);
+    expect(
+      (
+        await userB({
+          method: 'PATCH',
+          url: `/api/v1/actions/${action.id}`,
+          payload: { expectedRevision: action.revision, payload: action.payload },
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await userB({
+          method: 'POST',
+          url: `/api/v1/actions/${action.id}/confirm`,
+          payload: { expectedRevision: action.revision, idempotencyKey: crypto.randomUUID() },
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await userB({
+          method: 'POST',
+          url: `/api/v1/actions/${action.id}/execution-result`,
+          payload: { idempotencyKey: crypto.randomUUID(), status: 'succeeded' },
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect((await userB({ method: 'GET', url: `/api/v1/intakes/${id}/insights` })).statusCode).toBe(
+      404,
+    );
+    expect((await userB({ method: 'GET', url: `/api/v1/intakes/${id}/activity` })).statusCode).toBe(
+      404,
+    );
+    expect(
+      (await userB({ method: 'GET', url: '/api/v1/history' })).json<HistoryPage>().items,
+    ).toEqual([]);
+    expect(
+      (await userB({ method: 'GET', url: '/api/v1/data-summary' })).json<DataSummary>().intakes,
+    ).toBe(0);
+    expect(
+      (await userB({ method: 'DELETE', url: '/api/v1/history' })).json<{
+        deletedIntakes: number;
+      }>().deletedIntakes,
+    ).toBe(0);
+    expect((await userB({ method: 'DELETE', url: `/api/v1/intakes/${id}` })).statusCode).toBe(404);
+    expect((await userA({ method: 'GET', url: `/api/v1/intakes/${id}` })).statusCode).toBe(200);
+
+    const metrics = await app.inject({ method: 'GET', url: '/api/metrics' });
+    expect(metrics.statusCode).toBe(200);
+    expect(metrics.body).toContain('littletask_http_requests_total');
+
+    const accountDeleted = await userA({ method: 'DELETE', url: '/api/v1/account' });
+    expect(accountDeleted.statusCode).toBe(204);
+    expect((await userA({ method: 'GET', url: '/api/v1/history' })).statusCode).toBe(401);
+    expect((await userB({ method: 'GET', url: '/api/v1/history' })).statusCode).toBe(200);
+
+    await app.close();
+  });
+
   it('runs the fake screenshot-to-action flow with an explicit confirmation gate', async () => {
     const app = await buildApp({
       config: loadConfig({ NODE_ENV: 'test', AI_PROVIDER: 'fake', LOG_LEVEL: 'silent' }),
       logger: false,
     });
+    const inject = await authenticatedInject(app);
     const upload = multipartScreenshot();
 
-    const created = await app.inject({
+    const created = await inject({
       method: 'POST',
       url: '/api/v1/intakes',
       headers: { 'content-type': upload.contentType },
@@ -52,7 +156,7 @@ describe('LittleTask API', () => {
     const { id } = created.json<{ id: string }>();
 
     await wait(120);
-    const analyzed = await app.inject({ method: 'GET', url: `/api/v1/intakes/${id}` });
+    const analyzed = await inject({ method: 'GET', url: `/api/v1/intakes/${id}` });
     expect(analyzed.statusCode).toBe(200);
     const intake = analyzed.json<{
       status: string;
@@ -67,7 +171,7 @@ describe('LittleTask API', () => {
       throw new Error('Expected a meeting action');
     }
 
-    const patched = await app.inject({
+    const patched = await inject({
       method: 'PATCH',
       url: `/api/v1/actions/${initialAction.id}`,
       payload: {
@@ -80,7 +184,7 @@ describe('LittleTask API', () => {
     expect(action.revision).toBe(initialAction.revision + 1);
     expect(action.type === 'create_event' ? action.payload.title : null).toBe('与张明确认方案');
 
-    const stalePatch = await app.inject({
+    const stalePatch = await inject({
       method: 'PATCH',
       url: `/api/v1/actions/${initialAction.id}`,
       payload: {
@@ -90,7 +194,7 @@ describe('LittleTask API', () => {
     });
     expect(stalePatch.statusCode).toBe(409);
 
-    const executionBeforeConfirmation = await app.inject({
+    const executionBeforeConfirmation = await inject({
       method: 'POST',
       url: `/api/v1/actions/${action.id}/execution-result`,
       payload: {
@@ -100,7 +204,7 @@ describe('LittleTask API', () => {
     });
     expect(executionBeforeConfirmation.statusCode).toBe(409);
 
-    const staleConfirmation = await app.inject({
+    const staleConfirmation = await inject({
       method: 'POST',
       url: `/api/v1/actions/${action.id}/confirm`,
       payload: {
@@ -111,7 +215,7 @@ describe('LittleTask API', () => {
     expect(staleConfirmation.statusCode).toBe(409);
 
     const idempotencyKey = crypto.randomUUID();
-    const confirmed = await app.inject({
+    const confirmed = await inject({
       method: 'POST',
       url: `/api/v1/actions/${action.id}/confirm`,
       payload: { expectedRevision: action.revision, idempotencyKey },
@@ -119,7 +223,7 @@ describe('LittleTask API', () => {
     expect(confirmed.statusCode).toBe(200);
     expect(confirmed.json<{ status: string }>().status).toBe('confirmed');
 
-    const executed = await app.inject({
+    const executed = await inject({
       method: 'POST',
       url: `/api/v1/actions/${action.id}/execution-result`,
       payload: {
@@ -136,7 +240,7 @@ describe('LittleTask API', () => {
     expect(executed.json<{ status: string }>().status).toBe('succeeded');
 
     await wait(80);
-    const insights = await app.inject({
+    const insights = await inject({
       method: 'GET',
       url: `/api/v1/intakes/${id}/insights`,
     });
@@ -171,7 +275,7 @@ describe('LittleTask API', () => {
       throw new Error('Expected a create-contact action');
     }
     const confirmationIdempotencyKey = crypto.randomUUID();
-    await app.inject({
+    await inject({
       method: 'POST',
       url: `/api/v1/actions/${retryableAction.id}/confirm`,
       payload: {
@@ -180,7 +284,7 @@ describe('LittleTask API', () => {
       },
     });
     const firstExecutionKey = crypto.randomUUID();
-    const failed = await app.inject({
+    const failed = await inject({
       method: 'POST',
       url: `/api/v1/actions/${retryableAction.id}/execution-result`,
       payload: {
@@ -197,7 +301,7 @@ describe('LittleTask API', () => {
     expect(failed.json<{ status: string }>().status).toBe('failed');
 
     const repeatedFailureKey = crypto.randomUUID();
-    const repeatedFailure = await app.inject({
+    const repeatedFailure = await inject({
       method: 'POST',
       url: `/api/v1/actions/${retryableAction.id}/execution-result`,
       payload: {
@@ -209,7 +313,7 @@ describe('LittleTask API', () => {
     });
     expect(repeatedFailure.json<{ status: string }>().status).toBe('failed');
 
-    const conflictingReplay = await app.inject({
+    const conflictingReplay = await inject({
       method: 'POST',
       url: `/api/v1/actions/${retryableAction.id}/execution-result`,
       payload: {
@@ -220,7 +324,7 @@ describe('LittleTask API', () => {
     });
     expect(conflictingReplay.statusCode).toBe(409);
 
-    const retried = await app.inject({
+    const retried = await inject({
       method: 'POST',
       url: `/api/v1/actions/${retryableAction.id}/execution-result`,
       payload: {
@@ -236,7 +340,7 @@ describe('LittleTask API', () => {
     });
     expect(retried.json<{ status: string }>().status).toBe('succeeded');
 
-    const lateFailure = await app.inject({
+    const lateFailure = await inject({
       method: 'POST',
       url: `/api/v1/actions/${retryableAction.id}/execution-result`,
       payload: {
@@ -248,7 +352,7 @@ describe('LittleTask API', () => {
     });
     expect(lateFailure.statusCode).toBe(409);
 
-    const replayedFailure = await app.inject({
+    const replayedFailure = await inject({
       method: 'POST',
       url: `/api/v1/actions/${retryableAction.id}/execution-result`,
       payload: {
@@ -260,7 +364,7 @@ describe('LittleTask API', () => {
     });
     expect(replayedFailure.json<{ status: string }>().status).toBe('succeeded');
 
-    const refreshedInsights = await app.inject({
+    const refreshedInsights = await inject({
       method: 'GET',
       url: `/api/v1/intakes/${id}/insights`,
     });
@@ -275,7 +379,7 @@ describe('LittleTask API', () => {
       ]),
     );
 
-    const activity = await app.inject({
+    const activity = await inject({
       method: 'GET',
       url: `/api/v1/intakes/${id}/activity`,
     });
@@ -294,12 +398,10 @@ describe('LittleTask API', () => {
       ]),
     );
 
-    const removed = await app.inject({ method: 'DELETE', url: `/api/v1/intakes/${id}` });
+    const removed = await inject({ method: 'DELETE', url: `/api/v1/intakes/${id}` });
     expect(removed.statusCode).toBe(204);
-    expect((await app.inject({ method: 'GET', url: `/api/v1/intakes/${id}` })).statusCode).toBe(
-      404,
-    );
-    const afterDelete = await app.inject({ method: 'GET', url: '/api/v1/data-summary' });
+    expect((await inject({ method: 'GET', url: `/api/v1/intakes/${id}` })).statusCode).toBe(404);
+    const afterDelete = await inject({ method: 'GET', url: '/api/v1/data-summary' });
     expect(afterDelete.json<DataSummary>()).toMatchObject({
       intakes: 0,
       actions: 0,
@@ -308,7 +410,6 @@ describe('LittleTask API', () => {
       temporaryScreenshots: 0,
       screenshotsRetainedAfterAnalysis: false,
     });
-
     await app.close();
   });
 
@@ -318,10 +419,11 @@ describe('LittleTask API', () => {
       logger: false,
       inlineWorker: false,
     });
+    const inject = await authenticatedInject(app);
     const ids: string[] = [];
     for (let index = 0; index < 3; index += 1) {
       const upload = multipartScreenshot();
-      const created = await app.inject({
+      const created = await inject({
         method: 'POST',
         url: '/api/v1/intakes',
         headers: { 'content-type': upload.contentType },
@@ -331,12 +433,12 @@ describe('LittleTask API', () => {
     }
 
     const firstPage = (
-      await app.inject({ method: 'GET', url: '/api/v1/history?limit=2' })
+      await inject({ method: 'GET', url: '/api/v1/history?limit=2' })
     ).json<HistoryPage>();
     expect(firstPage.items).toHaveLength(2);
     expect(firstPage.nextCursor).toBeTruthy();
     const secondPage = (
-      await app.inject({
+      await inject({
         method: 'GET',
         url: `/api/v1/history?limit=2&cursor=${encodeURIComponent(firstPage.nextCursor ?? '')}`,
       })
@@ -347,7 +449,7 @@ describe('LittleTask API', () => {
       new Set(ids),
     );
 
-    const invalidCursor = await app.inject({
+    const invalidCursor = await inject({
       method: 'GET',
       url: '/api/v1/history?cursor=not-a-valid-cursor',
     });
@@ -357,15 +459,15 @@ describe('LittleTask API', () => {
     );
 
     const summary = (
-      await app.inject({ method: 'GET', url: '/api/v1/data-summary' })
+      await inject({ method: 'GET', url: '/api/v1/data-summary' })
     ).json<DataSummary>();
     expect(summary).toMatchObject({ intakes: 3, actions: 0, temporaryScreenshots: 3 });
 
-    const cleared = await app.inject({ method: 'DELETE', url: '/api/v1/history' });
+    const cleared = await inject({ method: 'DELETE', url: '/api/v1/history' });
     expect(cleared.statusCode).toBe(200);
     expect(cleared.json<{ deletedIntakes: number }>().deletedIntakes).toBe(3);
     expect(
-      (await app.inject({ method: 'GET', url: '/api/v1/data-summary' })).json<DataSummary>(),
+      (await inject({ method: 'GET', url: '/api/v1/data-summary' })).json<DataSummary>(),
     ).toMatchObject({ intakes: 0, temporaryScreenshots: 0 });
 
     await app.close();

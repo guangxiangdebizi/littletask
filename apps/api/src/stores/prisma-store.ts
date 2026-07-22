@@ -23,8 +23,10 @@ import { Prisma, PrismaClient } from '../generated/prisma/client';
 import { historyOutcome, summarizeActions } from '../history';
 import type {
   AnalyzeInput,
+  AuthPrincipal,
   ClaimedAnalysisJob,
   ClaimedSuggestionJob,
+  DeviceSessionInput,
   ExecutionRecordInput,
   ExecutionRecord,
   ExecutionObservation,
@@ -127,10 +129,60 @@ export function createPrismaClient(databaseUrl: string): PrismaClient {
 export class PrismaIntakeStore implements IntakeStore {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async create(intake: Intake, analysisInput: AnalyzeInput, maxAttempts: number): Promise<void> {
+  async createDeviceSession(input: DeviceSessionInput): Promise<void> {
+    await this.prisma.user.create({
+      data: {
+        id: input.userId,
+        createdAt: input.createdAt,
+        devices: {
+          create: {
+            id: input.deviceId,
+            tokenHash: input.tokenHash,
+            createdAt: input.createdAt,
+            lastSeenAt: input.createdAt,
+          },
+        },
+      },
+    });
+  }
+
+  async findDeviceSession(tokenHash: string): Promise<AuthPrincipal | undefined> {
+    const session = await this.prisma.deviceSession.findUnique({
+      where: { tokenHash },
+      select: { id: true, userId: true, revokedAt: true, lastSeenAt: true },
+    });
+    if (!session || session.revokedAt) return undefined;
+    if (session.lastSeenAt.getTime() < Date.now() - 5 * 60_000) {
+      await this.prisma.deviceSession.updateMany({
+        where: { id: session.id, revokedAt: null },
+        data: { lastSeenAt: new Date() },
+      });
+    }
+    return { userId: session.userId, deviceId: session.id };
+  }
+
+  async revokeDeviceSession(deviceId: string): Promise<void> {
+    await this.prisma.deviceSession.updateMany({
+      where: { id: deviceId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  async deleteUser(userId: string): Promise<boolean> {
+    const result = await this.prisma.user.deleteMany({ where: { id: userId } });
+    return result.count > 0;
+  }
+
+  async create(
+    userId: string,
+    intake: Intake,
+    analysisInput: AnalyzeInput,
+    maxAttempts: number,
+  ): Promise<void> {
     await this.prisma.intake.create({
       data: {
         id: intake.id,
+        userId,
         status: intake.status,
         note: intake.note,
         locale: intake.locale,
@@ -165,31 +217,40 @@ export class PrismaIntakeStore implements IntakeStore {
     });
   }
 
-  async get(id: string): Promise<Intake | undefined> {
-    const row = await this.prisma.intake.findUnique({ where: { id }, include: intakeInclude });
+  async get(userId: string, id: string): Promise<Intake | undefined> {
+    const row = await this.prisma.intake.findFirst({
+      where: { id, userId },
+      include: intakeInclude,
+    });
     return row ? toDomainIntake(row) : undefined;
   }
 
-  async list(): Promise<Intake[]> {
+  async list(userId: string): Promise<Intake[]> {
     const rows = await this.prisma.intake.findMany({
+      where: { userId },
       include: intakeInclude,
       orderBy: { createdAt: 'desc' },
     });
     return rows.map(toDomainIntake);
   }
 
-  async listHistory(input: { limit: number; before?: HistoryCursor }): Promise<HistoryStorePage> {
+  async listHistory(
+    userId: string,
+    input: { limit: number; before?: HistoryCursor },
+  ): Promise<HistoryStorePage> {
     const beforeDate = input.before ? new Date(input.before.createdAt) : null;
     const rows = await this.prisma.intake.findMany({
-      where:
-        input.before && beforeDate
+      where: {
+        userId,
+        ...(input.before && beforeDate
           ? {
               OR: [
                 { createdAt: { lt: beforeDate } },
                 { createdAt: beforeDate, id: { lt: input.before.id } },
               ],
             }
-          : undefined,
+          : {}),
+      },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: input.limit + 1,
       select: {
@@ -218,12 +279,13 @@ export class PrismaIntakeStore implements IntakeStore {
     return { items, hasMore: rows.length > input.limit };
   }
 
-  async listActivity(intakeId: string): Promise<ActivityEvent[]> {
-    const [intake, revisions, confirmations, executions, latestModelRun] = await Promise.all([
-      this.prisma.intake.findUnique({
-        where: { id: intakeId },
-        select: { id: true, status: true, createdAt: true },
-      }),
+  async listActivity(userId: string, intakeId: string): Promise<ActivityEvent[]> {
+    const intake = await this.prisma.intake.findFirst({
+      where: { id: intakeId, userId },
+      select: { id: true, status: true, createdAt: true },
+    });
+    if (!intake) return [];
+    const [revisions, confirmations, executions, latestModelRun] = await Promise.all([
       this.prisma.actionRevision.findMany({
         where: { action: { intakeId } },
         include: { action: { select: { type: true } } },
@@ -237,11 +299,10 @@ export class PrismaIntakeStore implements IntakeStore {
         include: { action: { select: { type: true } } },
       }),
       this.prisma.modelRun.findFirst({
-        where: { intakeId, stage: { in: ['analysis', 'review'] } },
+        where: { intakeId, intake: { userId }, stage: { in: ['analysis', 'review'] } },
         orderBy: { completedAt: 'desc' },
       }),
     ]);
-    if (!intake) return [];
 
     const events: ActivityEvent[] = [
       activityEventSchema.parse({
@@ -307,13 +368,15 @@ export class PrismaIntakeStore implements IntakeStore {
       .slice(0, 200);
   }
 
-  async getDataSummary(): Promise<DataSummary> {
+  async getDataSummary(userId: string): Promise<DataSummary> {
     const [intakes, actions, executionResults, insights, temporaryScreenshots] = await Promise.all([
-      this.prisma.intake.count(),
-      this.prisma.action.count(),
-      this.prisma.actionExecution.count(),
-      this.prisma.insight.count(),
-      this.prisma.analysisJob.count({ where: { imagePayload: { not: null } } }),
+      this.prisma.intake.count({ where: { userId } }),
+      this.prisma.action.count({ where: { intake: { userId } } }),
+      this.prisma.actionExecution.count({ where: { action: { intake: { userId } } } }),
+      this.prisma.insight.count({ where: { intake: { userId } } }),
+      this.prisma.analysisJob.count({
+        where: { intake: { userId }, imagePayload: { not: null } },
+      }),
     ]);
     return dataSummarySchema.parse({
       intakes,
@@ -326,12 +389,13 @@ export class PrismaIntakeStore implements IntakeStore {
   }
 
   async replace(
+    userId: string,
     intake: Intake,
     revisionSource: 'ai' | 'user' | 'system' = 'system',
   ): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
-      await transaction.intake.update({
-        where: { id: intake.id },
+      const result = await transaction.intake.updateMany({
+        where: { id: intake.id, userId },
         data: {
           status: intake.status,
           note: intake.note,
@@ -346,6 +410,7 @@ export class PrismaIntakeStore implements IntakeStore {
           updatedAt: new Date(intake.updatedAt),
         },
       });
+      if (result.count !== 1) throw new Error(`Intake not found: ${intake.id}`);
 
       for (const action of intake.actions) {
         await transaction.action.upsert({
@@ -389,19 +454,19 @@ export class PrismaIntakeStore implements IntakeStore {
     });
   }
 
-  async delete(id: string): Promise<boolean> {
-    const result = await this.prisma.intake.deleteMany({ where: { id } });
+  async delete(userId: string, id: string): Promise<boolean> {
+    const result = await this.prisma.intake.deleteMany({ where: { id, userId } });
     return result.count > 0;
   }
 
-  async deleteAll(): Promise<number> {
-    const result = await this.prisma.intake.deleteMany();
+  async deleteAll(userId: string): Promise<number> {
+    const result = await this.prisma.intake.deleteMany({ where: { userId } });
     return result.count;
   }
 
-  async getInsights(intakeId: string): Promise<Insight[]> {
+  async getInsights(userId: string, intakeId: string): Promise<Insight[]> {
     const rows = await this.prisma.insight.findMany({
-      where: { intakeId },
+      where: { intakeId, intake: { userId } },
       orderBy: { createdAt: 'asc' },
     });
     return insightSchema.array().parse(
@@ -421,8 +486,10 @@ export class PrismaIntakeStore implements IntakeStore {
     );
   }
 
-  async setRuleInsights(intakeId: string, insights: Insight[]): Promise<void> {
+  async setRuleInsights(userId: string, intakeId: string, insights: Insight[]): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
+      const intake = await transaction.intake.findFirst({ where: { id: intakeId, userId } });
+      if (!intake) throw new Error(`Intake not found: ${intakeId}`);
       await transaction.insight.deleteMany({ where: { intakeId, generator: 'rules' } });
       const ruleInsights = insights.filter((insight) => insight.generator === 'rules');
       if (ruleInsights.length === 0) return;
@@ -445,6 +512,7 @@ export class PrismaIntakeStore implements IntakeStore {
   }
 
   async enqueueSuggestionJob(
+    userId: string,
     input: GroundedSuggestionInput,
     inputHash: string,
     maxAttempts: number,
@@ -454,6 +522,11 @@ export class PrismaIntakeStore implements IntakeStore {
       throw new Error('Suggestion input hash must be a lowercase SHA-256 value');
     }
     return this.prisma.$transaction(async (transaction) => {
+      const intake = await transaction.intake.findUnique({
+        where: { id: parsedInput.intakeId, userId },
+        select: { userId: true },
+      });
+      if (!intake) throw new Error(`Intake not found: ${parsedInput.intakeId}`);
       const rows = await transaction.$queryRaw<LockedSuggestionJobRow[]>(Prisma.sql`
         SELECT "id", "intake_id", "generation", "input_hash", "status"
         FROM "suggestion_jobs"
@@ -507,9 +580,9 @@ export class PrismaIntakeStore implements IntakeStore {
     });
   }
 
-  async getSuggestionJobState(intakeId: string): Promise<SuggestionJobState> {
-    const job = await this.prisma.suggestionJob.findUnique({
-      where: { intakeId },
+  async getSuggestionJobState(userId: string, intakeId: string): Promise<SuggestionJobState> {
+    const job = await this.prisma.suggestionJob.findFirst({
+      where: { intakeId, intake: { userId } },
       select: { status: true, generation: true },
     });
     if (!job) return { status: 'not_requested', generation: null };
@@ -600,9 +673,15 @@ export class PrismaIntakeStore implements IntakeStore {
         });
         return null;
       }
+      const intake = await transaction.intake.findUnique({
+        where: { id: row.intake_id },
+        select: { userId: true },
+      });
+      if (!intake) return null;
       return {
         ...parsedInput.data,
         jobId: row.id,
+        userId: intake.userId,
         generation: row.generation,
         attempt: row.attempts,
         maxAttempts: row.max_attempts,
@@ -695,10 +774,16 @@ export class PrismaIntakeStore implements IntakeStore {
   }
 
   async rememberConfirmation(
+    userId: string,
     idempotencyKey: string,
     actionId: string,
     revision: number,
   ): Promise<string> {
+    const action = await this.prisma.action.findFirst({
+      where: { id: actionId, intake: { userId } },
+      select: { id: true },
+    });
+    if (!action) throw new Error(`Action not found: ${actionId}`);
     const row = await this.prisma.actionConfirmation.upsert({
       where: { idempotencyKey },
       create: {
@@ -713,23 +798,28 @@ export class PrismaIntakeStore implements IntakeStore {
     return row.actionId;
   }
 
-  async getConfirmation(idempotencyKey: string): Promise<string | undefined> {
-    const row = await this.prisma.actionConfirmation.findUnique({
-      where: { idempotencyKey },
+  async getConfirmation(userId: string, idempotencyKey: string): Promise<string | undefined> {
+    const row = await this.prisma.actionConfirmation.findFirst({
+      where: { idempotencyKey, action: { intake: { userId } } },
       select: { actionId: true },
     });
     return row?.actionId;
   }
 
-  async getExecution(idempotencyKey: string): Promise<ExecutionRecord | undefined> {
-    const row = await this.prisma.actionExecution.findUnique({
-      where: { idempotencyKey },
+  async getExecution(userId: string, idempotencyKey: string): Promise<ExecutionRecord | undefined> {
+    const row = await this.prisma.actionExecution.findFirst({
+      where: { idempotencyKey, action: { intake: { userId } } },
       select: { actionId: true, status: true },
     });
     return row ?? undefined;
   }
 
-  async recordExecution(input: ExecutionRecordInput): Promise<ExecutionRecord> {
+  async recordExecution(userId: string, input: ExecutionRecordInput): Promise<ExecutionRecord> {
+    const action = await this.prisma.action.findFirst({
+      where: { id: input.actionId, intake: { userId } },
+      select: { id: true },
+    });
+    if (!action) throw new Error(`Action not found: ${input.actionId}`);
     const nativeRecordRef = input.nativeRecordRef
       ? `sha256:${createHash('sha256').update(input.nativeRecordRef).digest('hex')}`
       : null;
@@ -751,9 +841,12 @@ export class PrismaIntakeStore implements IntakeStore {
     return { actionId: row.actionId, status: row.status };
   }
 
-  async listExecutionObservations(intakeId: string): Promise<ExecutionObservation[]> {
+  async listExecutionObservations(
+    userId: string,
+    intakeId: string,
+  ): Promise<ExecutionObservation[]> {
     const rows = await this.prisma.actionExecution.findMany({
-      where: { action: { intakeId } },
+      where: { action: { intakeId, intake: { userId } } },
       orderBy: { createdAt: 'asc' },
       select: {
         actionId: true,
@@ -864,6 +957,7 @@ export class PrismaIntakeStore implements IntakeStore {
       return {
         jobId: row.id,
         intakeId: row.intake_id,
+        userId: intake.userId,
         image: Buffer.from(row.image_payload),
         mimeType: row.mime_type,
         note: intake.note,
@@ -877,7 +971,7 @@ export class PrismaIntakeStore implements IntakeStore {
   }
 
   async completeAnalysisJob(jobId: string): Promise<void> {
-    await this.prisma.analysisJob.update({
+    await this.prisma.analysisJob.updateMany({
       where: { id: jobId },
       data: {
         status: 'succeeded',
@@ -893,8 +987,10 @@ export class PrismaIntakeStore implements IntakeStore {
 
   async rescheduleAnalysisJob(jobId: string, delayMs: number, errorCode: string): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
+      const current = await transaction.analysisJob.findUnique({ where: { id: jobId } });
+      if (!current) return;
       const job = await transaction.analysisJob.update({
-        where: { id: jobId },
+        where: { id: current.id },
         data: {
           status: 'retry',
           availableAt: new Date(Date.now() + delayMs),
@@ -904,7 +1000,7 @@ export class PrismaIntakeStore implements IntakeStore {
           updatedAt: new Date(),
         },
       });
-      await transaction.intake.update({
+      await transaction.intake.updateMany({
         where: { id: job.intakeId },
         data: { status: 'queued', error: Prisma.DbNull, updatedAt: new Date() },
       });
@@ -913,8 +1009,10 @@ export class PrismaIntakeStore implements IntakeStore {
 
   async failAnalysisJob(jobId: string, errorCode: string, message: string): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
+      const current = await transaction.analysisJob.findUnique({ where: { id: jobId } });
+      if (!current) return;
       const job = await transaction.analysisJob.update({
-        where: { id: jobId },
+        where: { id: current.id },
         data: {
           status: 'failed',
           imagePayload: null,
@@ -925,7 +1023,7 @@ export class PrismaIntakeStore implements IntakeStore {
           updatedAt: new Date(),
         },
       });
-      await transaction.intake.update({
+      await transaction.intake.updateMany({
         where: { id: job.intakeId },
         data: {
           status: 'failed',

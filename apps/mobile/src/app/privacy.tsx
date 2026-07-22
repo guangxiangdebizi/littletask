@@ -1,5 +1,6 @@
 import { Feather } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Platform, Text, View } from 'react-native';
 
@@ -8,7 +9,7 @@ import { PrimaryButton } from '../components/primary-button';
 import { privacyScreenStyles as styles } from '../components/privacy-screen-styles';
 import { Screen } from '../components/screen';
 import { executionLedger } from '../features/actions/execution-ledger';
-import { clearAllData, getDataSummary } from '../lib/api';
+import { clearAllData, deleteAccount, getDataSummary } from '../lib/api';
 import { colors } from '../theme/tokens';
 
 export default function PrivacyScreen() {
@@ -23,6 +24,26 @@ export default function PrivacyScreen() {
       queryClient.removeQueries({ queryKey: ['activity'] });
       queryClient.removeQueries({ queryKey: ['insights'] });
       await queryClient.invalidateQueries({ queryKey: ['data-summary'] });
+    },
+  });
+  const deleteAccountMutation = useMutation({
+    mutationFn: async () => {
+      await deleteAccount();
+      try {
+        await executionLedger.clearAll();
+        return { localLedgerCleared: true };
+      } catch {
+        return { localLedgerCleared: false };
+      }
+    },
+    onSuccess: ({ localLedgerCleared }) => {
+      queryClient.clear();
+      if (!localLedgerCleared) {
+        const message = '服务端账户已删除，但本机执行账本清除失败，可稍后在隐私页重试。';
+        if (Platform.OS === 'web') globalThis.alert(message);
+        else Alert.alert('本机账本未清除', message);
+      }
+      router.replace('/');
     },
   });
 
@@ -61,6 +82,23 @@ export default function PrivacyScreen() {
         text: '清除本机记录',
         style: 'destructive',
         onPress: clear,
+      },
+    ]);
+  };
+
+  const confirmAccountDelete = () => {
+    const message =
+      '这会永久删除当前匿名账户、全部服务端记录和本机防重复账本。设备中已经创建的联系人和日历不会被修改。';
+    if (Platform.OS === 'web') {
+      if (globalThis.confirm(`删除匿名账户？\n\n${message}`)) deleteAccountMutation.mutate();
+      return;
+    }
+    Alert.alert('删除匿名账户？', message, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '永久删除账户',
+        style: 'destructive',
+        onPress: () => deleteAccountMutation.mutate(),
       },
     ]);
   };
@@ -141,6 +179,18 @@ export default function PrivacyScreen() {
           </Text>
         ) : null}
         <PrimaryButton label="只清除本机执行账本" onPress={confirmLocalClear} tone="quiet" />
+        <PrimaryButton
+          icon="user-x"
+          label="删除匿名账户"
+          loading={deleteAccountMutation.isPending}
+          onPress={confirmAccountDelete}
+          tone="danger"
+        />
+        {deleteAccountMutation.error ? (
+          <Text accessibilityLiveRegion="polite" style={styles.errorText}>
+            匿名账户删除失败，请检查网络后重试。
+          </Text>
+        ) : null}
         {localMessage ? (
           <Text accessibilityLiveRegion="polite" style={styles.success}>
             {localMessage}

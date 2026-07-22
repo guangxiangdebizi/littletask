@@ -22,6 +22,16 @@ Native Contacts and Calendar record references are hashed before persistence. Mo
 contain provider/model/version/timing metadata but not prompts, image bytes, API keys, or model
 response bodies.
 
+Anonymous users and device sessions are durable PostgreSQL records. A device receives one opaque
+bearer token; only its SHA-256 hash is stored. Every intake has a required `user_id`, and ownership
+filters are enforced before reading or mutating intakes, actions, confirmations, executions,
+insights, history, and deletion state. Deleting an account cascades through its sessions and all
+retained product data.
+
+The user-isolation migration removes any intake created before authentication existed. Those rows
+have no defensible owner and are not assigned to a shared or recoverable account. Apply this
+migration only after taking any operational backup required by the deployment policy.
+
 ## Queue behavior
 
 Workers claim one due job with a PostgreSQL transaction and `FOR UPDATE SKIP LOCKED`. Analysis jobs are prioritized so uploads are not delayed by follow-up generation. An analysis claim:

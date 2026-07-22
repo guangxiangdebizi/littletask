@@ -15,8 +15,10 @@ import {
 import { toHistoryItem } from '../history';
 import type {
   AnalyzeInput,
+  AuthPrincipal,
   ClaimedAnalysisJob,
   ClaimedSuggestionJob,
+  DeviceSessionInput,
   ExecutionRecordInput,
   ExecutionRecord,
   IntakeStore,
@@ -30,6 +32,7 @@ import type {
 interface MemoryJob {
   id: string;
   intakeId: string;
+  userId: string;
   status: 'queued' | 'processing' | 'retry' | 'succeeded' | 'failed';
   input: AnalyzeInput | null;
   attempts: number;
@@ -43,6 +46,7 @@ interface MemoryJob {
 interface MemorySuggestionJob {
   id: string;
   intakeId: string;
+  userId: string;
   status: 'queued' | 'processing' | 'retry' | 'succeeded' | 'failed';
   generation: number;
   inputHash: string;
@@ -90,6 +94,8 @@ function cloneAnalyzeInput(input: AnalyzeInput): AnalyzeInput {
 
 export class InMemoryIntakeStore implements IntakeStore {
   readonly #intakes = new Map<string, Intake>();
+  readonly #owners = new Map<string, string>();
+  readonly #deviceSessions = new Map<string, AuthPrincipal>();
   readonly #insights = new Map<string, Insight[]>();
   readonly #confirmations = new Map<string, MemoryConfirmation>();
   readonly #executions = new Map<string, MemoryExecution>();
@@ -98,15 +104,54 @@ export class InMemoryIntakeStore implements IntakeStore {
   readonly #suggestionJobs = new Map<string, MemorySuggestionJob>();
   readonly #modelRuns: ModelRunRecord[] = [];
 
-  async create(intake: Intake, analysisInput: AnalyzeInput, maxAttempts: number): Promise<void> {
+  async createDeviceSession(input: DeviceSessionInput): Promise<void> {
+    if (this.#deviceSessions.has(input.tokenHash)) {
+      throw new Error('Device session token already exists');
+    }
+    this.#deviceSessions.set(input.tokenHash, {
+      userId: input.userId,
+      deviceId: input.deviceId,
+    });
+  }
+
+  async findDeviceSession(tokenHash: string): Promise<AuthPrincipal | undefined> {
+    const session = this.#deviceSessions.get(tokenHash);
+    return session ? structuredClone(session) : undefined;
+  }
+
+  async revokeDeviceSession(deviceId: string): Promise<void> {
+    for (const [tokenHash, principal] of this.#deviceSessions) {
+      if (principal.deviceId === deviceId) this.#deviceSessions.delete(tokenHash);
+    }
+  }
+
+  async deleteUser(userId: string): Promise<boolean> {
+    await this.deleteAll(userId);
+    let found = false;
+    for (const [tokenHash, principal] of this.#deviceSessions) {
+      if (principal.userId !== userId) continue;
+      found = true;
+      this.#deviceSessions.delete(tokenHash);
+    }
+    return found;
+  }
+
+  async create(
+    userId: string,
+    intake: Intake,
+    analysisInput: AnalyzeInput,
+    maxAttempts: number,
+  ): Promise<void> {
     if (this.#intakes.has(intake.id)) {
       throw new Error(`Intake already exists: ${intake.id}`);
     }
     this.#intakes.set(intake.id, structuredClone(intake));
+    this.#owners.set(intake.id, userId);
     const id = randomUUID();
     this.#jobs.set(id, {
       id,
       intakeId: intake.id,
+      userId,
       status: 'queued',
       input: cloneAnalyzeInput(analysisInput),
       attempts: 0,
@@ -118,24 +163,30 @@ export class InMemoryIntakeStore implements IntakeStore {
     });
   }
 
-  async get(id: string): Promise<Intake | undefined> {
+  async get(userId: string, id: string): Promise<Intake | undefined> {
+    if (this.#owners.get(id) !== userId) return undefined;
     const intake = this.#intakes.get(id);
     return intake ? structuredClone(intake) : undefined;
   }
 
-  async list(): Promise<Intake[]> {
+  async list(userId: string): Promise<Intake[]> {
     return [...this.#intakes.values()]
+      .filter((intake) => this.#owners.get(intake.id) === userId)
       .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt))
       .map((intake) => structuredClone(intake));
   }
 
-  async listHistory(input: { limit: number; before?: HistoryCursor }): Promise<HistoryStorePage> {
+  async listHistory(
+    userId: string,
+    input: { limit: number; before?: HistoryCursor },
+  ): Promise<HistoryStorePage> {
     const candidates = [...this.#intakes.values()]
       .filter(
         (intake) =>
-          !input.before ||
-          intake.createdAt < input.before.createdAt ||
-          (intake.createdAt === input.before.createdAt && intake.id < input.before.id),
+          this.#owners.get(intake.id) === userId &&
+          (!input.before ||
+            intake.createdAt < input.before.createdAt ||
+            (intake.createdAt === input.before.createdAt && intake.id < input.before.id)),
       )
       .toSorted(
         (left, right) =>
@@ -148,7 +199,8 @@ export class InMemoryIntakeStore implements IntakeStore {
     };
   }
 
-  async listActivity(intakeId: string): Promise<ActivityEvent[]> {
+  async listActivity(userId: string, intakeId: string): Promise<ActivityEvent[]> {
+    if (this.#owners.get(intakeId) !== userId) return [];
     const intake = this.#intakes.get(intakeId);
     if (!intake) return [];
     const actionTypes = new Map(intake.actions.map((action) => [action.id, action.type]));
@@ -221,25 +273,36 @@ export class InMemoryIntakeStore implements IntakeStore {
       .slice(0, 200);
   }
 
-  async getDataSummary(): Promise<DataSummary> {
+  async getDataSummary(userId: string): Promise<DataSummary> {
+    const intakes = [...this.#intakes.values()].filter(
+      (intake) => this.#owners.get(intake.id) === userId,
+    );
+    const intakeIds = new Set(intakes.map((intake) => intake.id));
+    const actionIds = new Set(
+      intakes.flatMap((intake) => intake.actions.map((action) => action.id)),
+    );
     return dataSummarySchema.parse({
-      intakes: this.#intakes.size,
-      actions: [...this.#intakes.values()].reduce(
-        (total, intake) => total + intake.actions.length,
-        0,
-      ),
-      executionResults: this.#executions.size,
-      insights: [...this.#insights.values()].reduce((total, items) => total + items.length, 0),
-      temporaryScreenshots: [...this.#jobs.values()].filter((job) => job.input !== null).length,
+      intakes: intakes.length,
+      actions: intakes.reduce((total, intake) => total + intake.actions.length, 0),
+      executionResults: [...this.#executions.values()].filter((item) =>
+        actionIds.has(item.actionId),
+      ).length,
+      insights: [...this.#insights.entries()]
+        .filter(([intakeId]) => intakeIds.has(intakeId))
+        .reduce((total, [, items]) => total + items.length, 0),
+      temporaryScreenshots: [...this.#jobs.values()].filter(
+        (job) => job.userId === userId && job.input !== null,
+      ).length,
       screenshotsRetainedAfterAnalysis: false,
     });
   }
 
   async replace(
+    userId: string,
     intake: Intake,
     revisionSource: 'ai' | 'user' | 'system' = 'system',
   ): Promise<void> {
-    if (!this.#intakes.has(intake.id)) {
+    if (!this.#intakes.has(intake.id) || this.#owners.get(intake.id) !== userId) {
       throw new Error(`Intake not found: ${intake.id}`);
     }
     for (const action of intake.actions) {
@@ -259,9 +322,9 @@ export class InMemoryIntakeStore implements IntakeStore {
     this.#intakes.set(intake.id, structuredClone(intake));
   }
 
-  async delete(id: string): Promise<boolean> {
+  async delete(userId: string, id: string): Promise<boolean> {
     const intake = this.#intakes.get(id);
-    if (!intake) return false;
+    if (!intake || this.#owners.get(id) !== userId) return false;
     const actionIds = new Set(intake.actions.map((action) => action.id));
     this.#insights.delete(id);
     for (const [jobId, job] of this.#jobs) {
@@ -286,27 +349,27 @@ export class InMemoryIntakeStore implements IntakeStore {
       this.#modelRuns.length,
       ...this.#modelRuns.filter((run) => run.intakeId !== id),
     );
+    this.#owners.delete(id);
     return this.#intakes.delete(id);
   }
 
-  async deleteAll(): Promise<number> {
-    const count = this.#intakes.size;
-    this.#intakes.clear();
-    this.#insights.clear();
-    this.#confirmations.clear();
-    this.#executions.clear();
-    this.#jobs.clear();
-    this.#suggestionJobs.clear();
-    this.#revisions.splice(0);
-    this.#modelRuns.splice(0);
-    return count;
+  async deleteAll(userId: string): Promise<number> {
+    const ids = [...this.#owners.entries()]
+      .filter(([, ownerId]) => ownerId === userId)
+      .map(([intakeId]) => intakeId);
+    for (const intakeId of ids) await this.delete(userId, intakeId);
+    return ids.length;
   }
 
-  async getInsights(intakeId: string): Promise<Insight[]> {
+  async getInsights(userId: string, intakeId: string): Promise<Insight[]> {
+    if (this.#owners.get(intakeId) !== userId) return [];
     return structuredClone(this.#insights.get(intakeId) ?? []);
   }
 
-  async setRuleInsights(intakeId: string, insights: Insight[]): Promise<void> {
+  async setRuleInsights(userId: string, intakeId: string, insights: Insight[]): Promise<void> {
+    if (this.#owners.get(intakeId) !== userId) {
+      throw new Error(`Intake not found: ${intakeId}`);
+    }
     const modelInsights = (this.#insights.get(intakeId) ?? []).filter(
       (insight) => insight.generator === 'model',
     );
@@ -320,11 +383,15 @@ export class InMemoryIntakeStore implements IntakeStore {
   }
 
   async enqueueSuggestionJob(
+    userId: string,
     input: GroundedSuggestionInput,
     inputHash: string,
     maxAttempts: number,
   ): Promise<boolean> {
     const parsedInput = groundedSuggestionInputSchema.parse(input);
+    if (this.#owners.get(parsedInput.intakeId) !== userId) {
+      throw new Error(`Intake not found: ${parsedInput.intakeId}`);
+    }
     if (!/^[a-f0-9]{64}$/.test(inputHash)) {
       throw new Error('Suggestion input hash must be a lowercase SHA-256 value');
     }
@@ -338,6 +405,7 @@ export class InMemoryIntakeStore implements IntakeStore {
     this.#suggestionJobs.set(id, {
       id,
       intakeId: parsedInput.intakeId,
+      userId,
       status: 'queued',
       generation: (existing?.generation ?? 0) + 1,
       inputHash,
@@ -358,7 +426,10 @@ export class InMemoryIntakeStore implements IntakeStore {
     return true;
   }
 
-  async getSuggestionJobState(intakeId: string): Promise<SuggestionJobState> {
+  async getSuggestionJobState(userId: string, intakeId: string): Promise<SuggestionJobState> {
+    if (this.#owners.get(intakeId) !== userId) {
+      return { status: 'not_requested', generation: null };
+    }
     const job = [...this.#suggestionJobs.values()].find((item) => item.intakeId === intakeId);
     if (!job) return { status: 'not_requested', generation: null };
     const statuses = {
@@ -399,6 +470,7 @@ export class InMemoryIntakeStore implements IntakeStore {
       return {
         ...structuredClone(job.input),
         jobId: job.id,
+        userId: job.userId,
         generation: job.generation,
         attempt: job.attempts,
         maxAttempts: job.maxAttempts,
@@ -456,10 +528,12 @@ export class InMemoryIntakeStore implements IntakeStore {
   }
 
   async rememberConfirmation(
+    userId: string,
     idempotencyKey: string,
     actionId: string,
     revision: number,
   ): Promise<string> {
+    if (!this.ownsAction(userId, actionId)) throw new Error(`Action not found: ${actionId}`);
     const existing = this.#confirmations.get(idempotencyKey);
     if (existing) return existing.actionId;
     this.#confirmations.set(idempotencyKey, {
@@ -471,16 +545,21 @@ export class InMemoryIntakeStore implements IntakeStore {
     return actionId;
   }
 
-  async getConfirmation(idempotencyKey: string): Promise<string | undefined> {
-    return this.#confirmations.get(idempotencyKey)?.actionId;
+  async getConfirmation(userId: string, idempotencyKey: string): Promise<string | undefined> {
+    const actionId = this.#confirmations.get(idempotencyKey)?.actionId;
+    return actionId && this.ownsAction(userId, actionId) ? actionId : undefined;
   }
 
-  async getExecution(idempotencyKey: string): Promise<ExecutionRecord | undefined> {
+  async getExecution(userId: string, idempotencyKey: string): Promise<ExecutionRecord | undefined> {
     const execution = this.#executions.get(idempotencyKey);
-    return execution ? { actionId: execution.actionId, status: execution.status } : undefined;
+    return execution && this.ownsAction(userId, execution.actionId)
+      ? { actionId: execution.actionId, status: execution.status }
+      : undefined;
   }
 
-  async recordExecution(input: ExecutionRecordInput): Promise<ExecutionRecord> {
+  async recordExecution(userId: string, input: ExecutionRecordInput): Promise<ExecutionRecord> {
+    if (!this.ownsAction(userId, input.actionId))
+      throw new Error(`Action not found: ${input.actionId}`);
     const existing = this.#executions.get(input.idempotencyKey);
     if (existing) return { actionId: existing.actionId, status: existing.status };
     this.#executions.set(
@@ -495,7 +574,11 @@ export class InMemoryIntakeStore implements IntakeStore {
     return { actionId: input.actionId, status: input.status };
   }
 
-  async listExecutionObservations(intakeId: string): Promise<ExecutionObservation[]> {
+  async listExecutionObservations(
+    userId: string,
+    intakeId: string,
+  ): Promise<ExecutionObservation[]> {
+    if (this.#owners.get(intakeId) !== userId) return [];
     const actionIds = new Set(
       this.#intakes.get(intakeId)?.actions.map((action) => action.id) ?? [],
     );
@@ -548,6 +631,7 @@ export class InMemoryIntakeStore implements IntakeStore {
         ...cloneAnalyzeInput(job.input),
         jobId: job.id,
         intakeId: job.intakeId,
+        userId: job.userId,
         attempt: job.attempts,
         maxAttempts: job.maxAttempts,
       };
@@ -556,7 +640,8 @@ export class InMemoryIntakeStore implements IntakeStore {
   }
 
   async completeAnalysisJob(jobId: string): Promise<void> {
-    const job = this.requireJob(jobId);
+    const job = this.#jobs.get(jobId);
+    if (!job) return;
     job.status = 'succeeded';
     job.input = null;
     job.lockedAt = null;
@@ -565,7 +650,8 @@ export class InMemoryIntakeStore implements IntakeStore {
   }
 
   async rescheduleAnalysisJob(jobId: string, delayMs: number, errorCode: string): Promise<void> {
-    const job = this.requireJob(jobId);
+    const job = this.#jobs.get(jobId);
+    if (!job) return;
     job.status = 'retry';
     job.availableAt = Date.now() + delayMs;
     job.lockedAt = null;
@@ -583,7 +669,8 @@ export class InMemoryIntakeStore implements IntakeStore {
   }
 
   async failAnalysisJob(jobId: string, errorCode: string, message: string): Promise<void> {
-    const job = this.requireJob(jobId);
+    const job = this.#jobs.get(jobId);
+    if (!job) return;
     job.status = 'failed';
     job.input = null;
     job.lockedAt = null;
@@ -601,15 +688,17 @@ export class InMemoryIntakeStore implements IntakeStore {
   }
 
   async recordModelRun(run: ModelRunRecord): Promise<void> {
+    if (!this.#intakes.has(run.intakeId)) return;
     this.#modelRuns.push(structuredClone(run));
   }
 
   async close(): Promise<void> {}
 
-  private requireJob(id: string): MemoryJob {
-    const job = this.#jobs.get(id);
-    if (!job) throw new Error(`Analysis job not found: ${id}`);
-    return job;
+  private ownsAction(userId: string, actionId: string): boolean {
+    const intake = [...this.#intakes.values()].find((candidate) =>
+      candidate.actions.some((action) => action.id === actionId),
+    );
+    return Boolean(intake && this.#owners.get(intake.id) === userId);
   }
 
   private safeErrorCode(value: string | undefined): string | undefined {

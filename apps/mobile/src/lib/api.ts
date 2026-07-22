@@ -21,21 +21,10 @@ import {
 import type { ImagePickerAsset } from 'expo-image-picker';
 import { Platform } from 'react-native';
 
-function resolveApiRoot(): string {
-  const configured = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '');
-  if (configured) return configured;
+import { API_ROOT } from './api-root';
+import { clearDeviceToken, getDeviceToken, refreshDeviceToken } from './auth-session';
 
-  if (Platform.OS === 'web' && typeof globalThis.location !== 'undefined') {
-    const { origin, hostname } = globalThis.location;
-    if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
-      return `${origin}/api/v1`;
-    }
-  }
-
-  return 'http://127.0.0.1:3100/api/v1';
-}
-
-export const API_ROOT = resolveApiRoot();
+export { API_ROOT } from './api-root';
 
 export class ApiRequestError extends Error {
   constructor(
@@ -48,13 +37,20 @@ export class ApiRequestError extends Error {
 }
 
 async function requestJson(path: string, init?: RequestInit): Promise<unknown> {
-  const response = await fetch(`${API_ROOT}${path}`, {
-    ...init,
-    headers: {
-      Accept: 'application/json',
-      ...init?.headers,
-    },
-  });
+  const send = async (token: string) =>
+    fetch(`${API_ROOT}${path}`, {
+      ...init,
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+        ...init?.headers,
+      },
+    });
+  const token = await getDeviceToken();
+  let response = await send(token);
+  if (response.status === 401) {
+    response = await send(await refreshDeviceToken(token));
+  }
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
       error?: { code?: string; message?: string };
@@ -128,6 +124,42 @@ export async function getDataSummary(): Promise<DataSummary> {
 
 export async function clearAllData(): Promise<ClearAllDataResponse> {
   return clearAllDataResponseSchema.parse(await requestJson('/history', { method: 'DELETE' }));
+}
+
+export async function revokeDeviceSession(): Promise<void> {
+  const response = await fetch(`${API_ROOT}/auth/device`, {
+    method: 'DELETE',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${await getDeviceToken()}`,
+    },
+  });
+  if (!response.ok) {
+    throw new ApiRequestError(
+      'SESSION_REVOKE_FAILED',
+      `Device session revoke failed with ${response.status}`,
+      response.status,
+    );
+  }
+  await clearDeviceToken();
+}
+
+export async function deleteAccount(): Promise<void> {
+  const response = await fetch(`${API_ROOT}/account`, {
+    method: 'DELETE',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${await getDeviceToken()}`,
+    },
+  });
+  if (!response.ok) {
+    throw new ApiRequestError(
+      'ACCOUNT_DELETE_FAILED',
+      `Account deletion failed with ${response.status}`,
+      response.status,
+    );
+  }
+  await clearDeviceToken();
 }
 
 export async function patchAction(

@@ -6,6 +6,9 @@ import {
 } from '@littletask/contracts';
 import type { FastifyPluginAsync } from 'fastify';
 
+import { AuthenticationError } from '../auth-service';
+import type { AuthPrincipal } from '../types';
+
 const acceptedImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic']);
 
 interface IntakeParams {
@@ -16,7 +19,28 @@ interface ActionParams {
   id: string;
 }
 
+function userId(auth: AuthPrincipal | null): string {
+  if (!auth) throw new AuthenticationError();
+  return auth.userId;
+}
+
 export const intakeRoutes: FastifyPluginAsync = async (app) => {
+  app.addHook('onRequest', async (request) => {
+    request.auth = await app.authService.authenticate(request.headers.authorization);
+    app.rateLimiter.consume(
+      `request:${request.auth.deviceId}`,
+      app.appConfig.RATE_LIMIT_REQUESTS,
+      app.appConfig.RATE_LIMIT_WINDOW_MS,
+    );
+    if (request.method === 'POST' && request.routeOptions.url.endsWith('/intakes')) {
+      app.rateLimiter.consume(
+        `upload:${request.auth.deviceId}`,
+        app.appConfig.RATE_LIMIT_UPLOADS,
+        app.appConfig.RATE_LIMIT_WINDOW_MS,
+      );
+    }
+  });
+
   app.post('/intakes', async (request, reply) => {
     let image: Buffer | undefined;
     let mimeType = '';
@@ -69,7 +93,7 @@ export const intakeRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const intake = await app.intakeService.create({
+    const intake = await app.intakeService.create(userId(request.auth), {
       image,
       mimeType,
       originalName,
@@ -83,30 +107,33 @@ export const intakeRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get<{ Params: IntakeParams }>('/intakes/:id', async (request) =>
-    app.intakeService.get(request.params.id),
+    app.intakeService.get(userId(request.auth), request.params.id),
   );
 
   app.get('/history', async (request) =>
-    app.intakeService.listHistory(historyQuerySchema.parse(request.query)),
+    app.intakeService.listHistory(userId(request.auth), historyQuerySchema.parse(request.query)),
   );
 
-  app.delete('/history', async () => app.intakeService.deleteAll());
+  app.delete('/history', async (request) => app.intakeService.deleteAll(userId(request.auth)));
 
-  app.get('/data-summary', async () => app.intakeService.getDataSummary());
+  app.get('/data-summary', async (request) =>
+    app.intakeService.getDataSummary(userId(request.auth)),
+  );
 
   app.delete<{ Params: IntakeParams }>('/intakes/:id', async (request, reply) => {
-    await app.intakeService.delete(request.params.id);
+    await app.intakeService.delete(userId(request.auth), request.params.id);
     return reply.code(204).send();
   });
 
   app.patch<{ Params: ActionParams }>('/actions/:id', async (request) => {
     const body = actionPatchRequestSchema.parse(request.body);
-    return app.intakeService.patchAction(request.params.id, body);
+    return app.intakeService.patchAction(userId(request.auth), request.params.id, body);
   });
 
   app.post<{ Params: ActionParams }>('/actions/:id/confirm', async (request) => {
     const body = actionConfirmationRequestSchema.parse(request.body);
     return app.intakeService.confirmAction(
+      userId(request.auth),
       request.params.id,
       body.expectedRevision,
       body.idempotencyKey,
@@ -115,14 +142,14 @@ export const intakeRoutes: FastifyPluginAsync = async (app) => {
 
   app.post<{ Params: ActionParams }>('/actions/:id/execution-result', async (request) => {
     const body = executionResultRequestSchema.parse(request.body);
-    return app.intakeService.reportExecution(request.params.id, body);
+    return app.intakeService.reportExecution(userId(request.auth), request.params.id, body);
   });
 
   app.get<{ Params: IntakeParams }>('/intakes/:id/insights', async (request) =>
-    app.intakeService.getInsights(request.params.id),
+    app.intakeService.getInsights(userId(request.auth), request.params.id),
   );
 
   app.get<{ Params: IntakeParams }>('/intakes/:id/activity', async (request) =>
-    app.intakeService.getActivity(request.params.id),
+    app.intakeService.getActivity(userId(request.auth), request.params.id),
   );
 };

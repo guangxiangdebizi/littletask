@@ -3,6 +3,8 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '../..');
 const productionEnvironment = {
   NODE_ENV: 'production',
+  HOST: '127.0.0.1',
+  TRUST_PROXY: 'true',
   PERSISTENCE_PROVIDER: 'postgres',
   AI_PROVIDER: 'openai',
   OPENAI_BASE_URL: 'https://api.hostcentral.cc',

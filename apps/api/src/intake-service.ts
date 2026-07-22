@@ -95,7 +95,7 @@ export class IntakeService {
     this.options = { ...defaultOptions, ...options };
   }
 
-  async create(input: CreateIntakeInput): Promise<Intake> {
+  async create(userId: string, input: CreateIntakeInput): Promise<Intake> {
     const timestamp = new Date().toISOString();
     const intake: Intake = {
       id: randomUUID(),
@@ -120,26 +120,26 @@ export class IntakeService {
       updatedAt: timestamp,
     };
 
-    await this.store.create(intake, input, this.options.maxJobAttempts);
+    await this.store.create(userId, intake, input, this.options.maxJobAttempts);
     if (this.options.inlineWorker) this.scheduleInlineWorker();
     return intake;
   }
 
-  async get(id: string): Promise<Intake> {
-    const intake = await this.store.get(id);
+  async get(userId: string, id: string): Promise<Intake> {
+    const intake = await this.store.get(userId, id);
     if (!intake) {
       throw new DomainError('INTAKE_NOT_FOUND', 'Intake not found', 404);
     }
     return intake;
   }
 
-  list(): Promise<Intake[]> {
-    return this.store.list();
+  list(userId: string): Promise<Intake[]> {
+    return this.store.list(userId);
   }
 
-  async listHistory(request: HistoryQuery): Promise<HistoryPage> {
+  async listHistory(userId: string, request: HistoryQuery): Promise<HistoryPage> {
     const before = request.cursor ? this.decodeHistoryCursor(request.cursor) : undefined;
-    const page = await this.store.listHistory({
+    const page = await this.store.listHistory(userId, {
       limit: request.limit,
       ...(before ? { before } : {}),
     });
@@ -155,31 +155,35 @@ export class IntakeService {
     });
   }
 
-  async getActivity(intakeId: string) {
-    await this.get(intakeId);
+  async getActivity(userId: string, intakeId: string) {
+    await this.get(userId, intakeId);
     return activityResponseSchema.parse({
-      items: await this.store.listActivity(intakeId),
+      items: await this.store.listActivity(userId, intakeId),
     });
   }
 
-  getDataSummary() {
-    return this.store.getDataSummary();
+  getDataSummary(userId: string) {
+    return this.store.getDataSummary(userId);
   }
 
-  async delete(id: string): Promise<void> {
-    if (!(await this.store.delete(id))) {
+  async delete(userId: string, id: string): Promise<void> {
+    if (!(await this.store.delete(userId, id))) {
       throw new DomainError('INTAKE_NOT_FOUND', 'Intake not found', 404);
     }
   }
 
-  async deleteAll() {
+  async deleteAll(userId: string) {
     return clearAllDataResponseSchema.parse({
-      deletedIntakes: await this.store.deleteAll(),
+      deletedIntakes: await this.store.deleteAll(userId),
     });
   }
 
-  async patchAction(actionId: string, request: ActionPatchRequest): Promise<ActionCard> {
-    const { intake, actionIndex, action } = await this.findAction(actionId);
+  async patchAction(
+    userId: string,
+    actionId: string,
+    request: ActionPatchRequest,
+  ): Promise<ActionCard> {
+    const { intake, actionIndex, action } = await this.findAction(userId, actionId);
     if (!['draft', 'needs_input', 'ready'].includes(action.status)) {
       throw new DomainError('ACTION_LOCKED', 'Confirmed actions can no longer be edited', 409);
     }
@@ -197,16 +201,18 @@ export class IntakeService {
     });
     const actions = [...intake.actions];
     actions[actionIndex] = updated;
-    await this.store.replace({ ...intake, actions, updatedAt: updated.updatedAt }, 'user');
+    await this.store.replace(userId, { ...intake, actions, updatedAt: updated.updatedAt }, 'user');
     return updated;
   }
 
   async confirmAction(
+    userId: string,
     actionId: string,
     expectedRevision: number,
     idempotencyKey: string,
   ): Promise<ActionCard> {
-    const previousActionId = await this.store.getConfirmation(idempotencyKey);
+    const { intake, actionIndex, action } = await this.findAction(userId, actionId);
+    const previousActionId = await this.store.getConfirmation(userId, idempotencyKey);
     if (previousActionId && previousActionId !== actionId) {
       throw new DomainError(
         'IDEMPOTENCY_CONFLICT',
@@ -215,7 +221,6 @@ export class IntakeService {
       );
     }
 
-    const { intake, actionIndex, action } = await this.findAction(actionId);
     if (
       previousActionId &&
       ['confirmed', 'executing', 'succeeded', 'failed'].includes(action.status)
@@ -228,6 +233,7 @@ export class IntakeService {
     assertActionTransition(action.status, 'confirmed');
 
     const storedActionId = await this.store.rememberConfirmation(
+      userId,
       idempotencyKey,
       actionId,
       action.revision,
@@ -248,13 +254,19 @@ export class IntakeService {
     const actions = [...intake.actions];
     actions[actionIndex] = updated;
     const nextIntake = { ...intake, actions, updatedAt: updated.updatedAt };
-    await this.store.replace(nextIntake);
-    await this.refreshDerivedInsights(nextIntake);
+    await this.store.replace(userId, nextIntake);
+    await this.refreshDerivedInsights(userId, nextIntake);
     return updated;
   }
 
-  async reportExecution(actionId: string, request: ExecutionResultRequest): Promise<ActionCard> {
+  async reportExecution(
+    userId: string,
+    actionId: string,
+    request: ExecutionResultRequest,
+  ): Promise<ActionCard> {
+    const { intake, actionIndex, action } = await this.findAction(userId, actionId);
     const confirmedActionId = await this.store.getConfirmation(
+      userId,
       request.confirmationIdempotencyKey ?? request.idempotencyKey,
     );
     if (confirmedActionId !== actionId) {
@@ -265,8 +277,7 @@ export class IntakeService {
       );
     }
 
-    const { intake, actionIndex, action } = await this.findAction(actionId);
-    const existing = await this.store.getExecution(request.idempotencyKey);
+    const existing = await this.store.getExecution(userId, request.idempotencyKey);
     if (existing && (existing.actionId !== actionId || existing.status !== request.status)) {
       throw new DomainError(
         'IDEMPOTENCY_CONFLICT',
@@ -298,7 +309,7 @@ export class IntakeService {
 
     const recorded =
       existing ??
-      (await this.store.recordExecution({
+      (await this.store.recordExecution(userId, {
         actionId,
         idempotencyKey: request.idempotencyKey,
         status: request.status,
@@ -316,7 +327,7 @@ export class IntakeService {
       );
     }
     if (action.status === request.status) {
-      await this.refreshDerivedInsights(intake);
+      await this.refreshDerivedInsights(userId, intake);
       return action;
     }
 
@@ -328,24 +339,24 @@ export class IntakeService {
     const actions = [...intake.actions];
     actions[actionIndex] = updated;
     const nextIntake = { ...intake, actions, updatedAt: updated.updatedAt };
-    await this.store.replace(nextIntake);
-    await this.refreshDerivedInsights(nextIntake);
+    await this.store.replace(userId, nextIntake);
+    await this.refreshDerivedInsights(userId, nextIntake);
     return updated;
   }
 
-  async getInsights(intakeId: string) {
-    await this.get(intakeId);
+  async getInsights(userId: string, intakeId: string) {
+    await this.get(userId, intakeId);
     const [items, generation] = await Promise.all([
-      this.store.getInsights(intakeId),
-      this.store.getSuggestionJobState(intakeId),
+      this.store.getInsights(userId, intakeId),
+      this.store.getSuggestionJobState(userId, intakeId),
     ]);
     return insightResponseSchema.parse({ items, generationStatus: generation.status });
   }
 
-  private async refreshDerivedInsights(intake: Intake): Promise<void> {
+  private async refreshDerivedInsights(userId: string, intake: Intake): Promise<void> {
     const [relatedIntakes, executions] = await Promise.all([
-      this.store.list(),
-      this.store.listExecutionObservations(intake.id),
+      this.store.list(userId),
+      this.store.listExecutionObservations(userId, intake.id),
     ]);
     const ruleInsights = deriveInsights(
       {
@@ -355,12 +366,13 @@ export class IntakeService {
       },
       { createId: randomUUID, now: () => new Date() },
     );
-    await this.store.setRuleInsights(intake.id, ruleInsights);
+    await this.store.setRuleInsights(userId, intake.id, ruleInsights);
 
     const suggestionInput = this.buildSuggestionInput(intake, ruleInsights);
     if (!suggestionInput) return;
     const inputHash = createHash('sha256').update(JSON.stringify(suggestionInput)).digest('hex');
     const enqueued = await this.store.enqueueSuggestionJob(
+      userId,
       suggestionInput,
       inputHash,
       this.options.maxJobAttempts,
@@ -424,13 +436,13 @@ export class IntakeService {
 
   private async processAnalysisJob(job: ClaimedAnalysisJob): Promise<void> {
     try {
-      const current = await this.get(job.intakeId);
+      const current = await this.get(job.userId, job.intakeId);
       if (current.status === 'ready') {
         await this.store.completeAnalysisJob(job.jobId);
         return;
       }
 
-      await this.store.replace({
+      await this.store.replace(job.userId, {
         ...current,
         status: 'processing',
         error: null,
@@ -442,8 +454,8 @@ export class IntakeService {
       const reviewed = await this.runModelStage(job.intakeId, 'review', () =>
         this.provider.review(job, draft),
       );
-      const processing = await this.get(job.intakeId);
-      await this.store.replace(this.materializeAnalysis(processing, reviewed), 'ai');
+      const processing = await this.get(job.userId, job.intakeId);
+      await this.store.replace(job.userId, this.materializeAnalysis(processing, reviewed), 'ai');
       await this.store.completeAnalysisJob(job.jobId);
     } catch (error) {
       const code = this.errorCode(error);
@@ -461,7 +473,7 @@ export class IntakeService {
       const drafts = await this.runModelStage(job.intakeId, 'insight', () =>
         this.provider.suggestInsights(job),
       );
-      const currentInsights = await this.store.getInsights(job.intakeId);
+      const currentInsights = await this.store.getInsights(job.userId, job.intakeId);
       const insights = this.materializeSuggestions(job, drafts, currentInsights);
       await this.store.completeSuggestionJob(job.jobId, job.generation, insights);
     } catch (error) {
@@ -629,12 +641,15 @@ export class IntakeService {
     return `${actionId ?? 'intake'}:${type}:${title.trim().toLocaleLowerCase()}`;
   }
 
-  private async findAction(actionId: string): Promise<{
+  private async findAction(
+    userId: string,
+    actionId: string,
+  ): Promise<{
     intake: Intake;
     actionIndex: number;
     action: ActionCard;
   }> {
-    for (const intake of await this.store.list()) {
+    for (const intake of await this.store.list(userId)) {
       const actionIndex = intake.actions.findIndex((candidate) => candidate.id === actionId);
       if (actionIndex >= 0) {
         const action = intake.actions[actionIndex];

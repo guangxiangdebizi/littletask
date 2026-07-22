@@ -33,17 +33,52 @@ describe('grounded suggestion queue', () => {
     const store = new InMemoryIntakeStore();
     const intakeId = crypto.randomUUID();
     const actionId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
     const firstInput = suggestionInput(intakeId, actionId);
     const registeredEvidence = firstInput.evidence[0];
     if (!registeredEvidence) throw new Error('Expected registered evidence');
 
-    expect(await store.enqueueSuggestionJob(firstInput, 'a'.repeat(64), 3)).toBe(true);
+    await store.create(
+      userId,
+      {
+        id: intakeId,
+        status: 'ready',
+        note: null,
+        locale: 'zh-CN',
+        timezone: 'Asia/Shanghai',
+        image: {
+          sha256: 'a'.repeat(64),
+          mimeType: 'image/png',
+          bytes: 8,
+          originalName: null,
+        },
+        summary: '已经完成一次会议创建。',
+        participants: [],
+        facts: [],
+        uncertainties: [],
+        clarifyingQuestions: [],
+        actions: [],
+        error: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        image: Buffer.from('fixture'),
+        mimeType: 'image/png',
+        note: null,
+        locale: 'zh-CN',
+        timezone: 'Asia/Shanghai',
+        now: new Date(),
+      },
+      3,
+    );
+    expect(await store.enqueueSuggestionJob(userId, firstInput, 'a'.repeat(64), 3)).toBe(true);
     const firstJob = await store.claimSuggestionJob('worker-a', 60_000);
     expect(firstJob?.generation).toBe(1);
     if (!firstJob) throw new Error('Expected the first suggestion job');
 
     const secondInput = { ...firstInput, summary: '会议已经创建，并补充了新上下文。' };
-    expect(await store.enqueueSuggestionJob(secondInput, 'b'.repeat(64), 3)).toBe(true);
+    expect(await store.enqueueSuggestionJob(userId, secondInput, 'b'.repeat(64), 3)).toBe(true);
     const staleInsight = insightSchema.parse({
       id: crypto.randomUUID(),
       intakeId,
@@ -73,10 +108,10 @@ describe('grounded suggestion queue', () => {
     expect(
       await store.completeSuggestionJob(secondJob.jobId, secondJob.generation, [currentInsight]),
     ).toBe(true);
-    expect(await store.getSuggestionJobState(intakeId)).toEqual({
+    expect(await store.getSuggestionJobState(userId, intakeId)).toEqual({
       status: 'ready',
       generation: 2,
     });
-    expect(await store.getInsights(intakeId)).toEqual([currentInsight]);
+    expect(await store.getInsights(userId, intakeId)).toEqual([currentInsight]);
   });
 });

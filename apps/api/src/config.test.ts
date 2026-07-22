@@ -43,12 +43,24 @@ describe('loadConfig', () => {
   });
 
   it('locks production to PostgreSQL and the configured Terra gateway', () => {
+    expect(
+      loadConfig({
+        NODE_ENV: 'production',
+        HOST: '127.0.0.1',
+        TRUST_PROXY: 'true',
+        AI_PROVIDER: 'openai',
+        OPENAI_API_KEY: 'test-key',
+        PERSISTENCE_PROVIDER: 'postgres',
+        DATABASE_URL: 'postgresql://littletask:littletask@localhost:5432/littletask',
+      }).AI_PROVIDER,
+    ).toBe('openai');
     expect(() =>
       loadConfig({
         NODE_ENV: 'production',
         AI_PROVIDER: 'openai',
         OPENAI_API_KEY: 'test-key',
         PERSISTENCE_PROVIDER: 'memory',
+        TRUST_PROXY: 'true',
       }),
     ).toThrow();
     expect(() =>

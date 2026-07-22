@@ -44,8 +44,32 @@ enum ExecutionStatus {
   failed
 }
 
+model User {
+  id        String          @id @db.Uuid
+  createdAt DateTime        @map("created_at") @db.Timestamptz(3)
+  devices   DeviceSession[]
+  intakes   Intake[]
+
+  @@map("users")
+}
+
+model DeviceSession {
+  id         String    @id @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash") @db.Char(64)
+  createdAt  DateTime  @map("created_at") @db.Timestamptz(3)
+  lastSeenAt DateTime  @map("last_seen_at") @db.Timestamptz(3)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("device_sessions")
+}
+
 model Intake {
   id                  String       @id @db.Uuid
+  userId              String       @map("user_id") @db.Uuid
   status              IntakeStatus
   note                String?
   locale              String
@@ -63,13 +87,15 @@ model Intake {
   createdAt           DateTime     @map("created_at") @db.Timestamptz(3)
   updatedAt           DateTime     @map("updated_at") @db.Timestamptz(3)
 
-  actions   Action[]
-  insights  Insight[]
-  modelRuns ModelRun[]
-  job       AnalysisJob?
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  actions       Action[]
+  insights      Insight[]
+  modelRuns     ModelRun[]
+  job           AnalysisJob?
   suggestionJob SuggestionJob?
 
   @@index([createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
   @@map("intakes")
 }
 

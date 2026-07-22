@@ -35,8 +35,15 @@ export const executionResultRequestSchema = z.object({
   deviceContext: executionDeviceContextSchema.optional(),
 });
 
+export const deviceSessionResponseSchema = z.object({
+  userId: z.string().uuid(),
+  deviceId: z.string().uuid(),
+  token: z.string().regex(/^lt_[A-Za-z0-9_-]{43}$/),
+});
+
 export type ApiError = z.infer<typeof apiErrorSchema>;
 export type ActionPatchRequest = z.infer<typeof actionPatchRequestSchema>;
 export type ActionConfirmationRequest = z.infer<typeof actionConfirmationRequestSchema>;
 export type ExecutionResultRequest = z.infer<typeof executionResultRequestSchema>;
 export type ExecutionDeviceContext = z.infer<typeof executionDeviceContextSchema>;
+export type DeviceSessionResponse = z.infer<typeof deviceSessionResponseSchema>;

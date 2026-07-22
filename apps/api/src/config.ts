@@ -8,11 +8,16 @@ const optionalSecretSchema = z.preprocess(
   (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
   z.string().min(1).optional(),
 );
+const booleanSchema = z.preprocess(
+  (value) => (value === 'true' ? true : value === 'false' || value === undefined ? false : value),
+  z.boolean(),
+);
 
 const environmentSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     HOST: z.string().default('127.0.0.1'),
+    TRUST_PROXY: booleanSchema,
     PORT: z.coerce.number().int().min(1).max(65_535).default(3100),
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
@@ -34,6 +39,15 @@ const environmentSchema = z
       .min(1)
       .max(25 * 1024 * 1024)
       .default(10 * 1024 * 1024),
+    RATE_LIMIT_REQUESTS: z.coerce.number().int().min(10).max(10_000).default(240),
+    RATE_LIMIT_UPLOADS: z.coerce.number().int().min(1).max(1_000).default(20),
+    RATE_LIMIT_REGISTRATIONS: z.coerce.number().int().min(1).max(100).default(10),
+    RATE_LIMIT_WINDOW_MS: z.coerce
+      .number()
+      .int()
+      .min(10_000)
+      .max(60 * 60_000)
+      .default(60_000),
     IMAGE_RETENTION: z.literal('none').default('none'),
     AI_PROVIDER: z.enum(['fake', 'openai']).default('openai'),
     OPENAI_BASE_URL: z.literal('https://api.hostcentral.cc').default('https://api.hostcentral.cc'),
@@ -78,6 +92,20 @@ const environmentSchema = z
         code: 'custom',
         message: 'Production requires PERSISTENCE_PROVIDER=postgres',
         path: ['PERSISTENCE_PROVIDER'],
+      });
+    }
+    if (value.NODE_ENV === 'production' && !value.TRUST_PROXY) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Production behind Nginx requires TRUST_PROXY=true',
+        path: ['TRUST_PROXY'],
+      });
+    }
+    if (value.NODE_ENV === 'production' && value.HOST !== '127.0.0.1') {
+      context.addIssue({
+        code: 'custom',
+        message: 'Production API must remain bound to 127.0.0.1 behind Nginx',
+        path: ['HOST'],
       });
     }
   });

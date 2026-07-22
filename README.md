@@ -23,8 +23,9 @@ The project is in active development. The first vertical slice includes:
 - Receive grounded follow-up insights
 - Review cursor-paginated history and action provenance
 - Delete one intake or all retained server-side data
+- Isolate anonymous device sessions and delete the complete account
 
-The GPT-5.6 Terra provider is implemented with stateless analysis, review, and evidence-constrained suggestion requests. PostgreSQL persists the complete intake/action audit trail and feeds a restart-safe standalone AI worker. The iOS client includes editable revision-bound cards, local contact matching, calendar conflict checks, native Contacts/Calendar adapters, a SQLite execution ledger, asynchronous model-suggestion polling, history provenance, and privacy controls. Its iOS JavaScript bundle passes locally; an EAS build and physical-device acceptance remain before TestFlight. A rotated runtime credential is still required for the live gateway compatibility check. The full product and delivery plan is documented in [plan.md](./plan.md).
+The GPT-5.6 Terra provider is implemented with stateless analysis, review, and evidence-constrained suggestion requests. PostgreSQL persists the complete intake/action audit trail and feeds a restart-safe standalone AI worker. Anonymous device sessions isolate every user-owned query while storing only bearer-token hashes. The API adds separate registration/upload/request limits and bounded-label Prometheus metrics. The iOS client includes editable revision-bound cards, local contact matching, calendar conflict checks, native Contacts/Calendar adapters, a SQLite execution ledger, asynchronous model-suggestion polling, history provenance, and privacy controls. Its iOS JavaScript bundle passes locally; an EAS build and physical-device acceptance remain before TestFlight. A rotated runtime credential is still required for the live gateway compatibility check. The full product and delivery plan is documented in [plan.md](./plan.md).
 
 ## Stack
 
@@ -89,7 +90,9 @@ Start `corepack pnpm dev:worker` in another terminal. See [docs/persistence.md](
 
 Native execution is never performed by the Web acceptance build. See [docs/native-execution.md](./docs/native-execution.md) for permission timing, confirmation ordering, duplicate/conflict checks, crash recovery, and the physical-device test checklist.
 
-History returns compact summaries through an opaque cursor rather than downloading every intake. Each intake exposes a provenance timeline for AI revisions, user edits and confirmations, and device results. The privacy page shows retained counts, deletes a single intake or all server-side records, and separately clears the local execution ledger. Grounded model advice runs in a separate generation-safe queue and can only cite the server's bounded evidence registry. See [docs/history-and-privacy.md](./docs/history-and-privacy.md) and [docs/grounded-insights.md](./docs/grounded-insights.md).
+History returns compact summaries through an opaque cursor rather than downloading every intake. Each intake exposes a provenance timeline for AI revisions, user edits and confirmations, and device results. The privacy page shows retained counts, deletes a single intake, all user records, or the anonymous account, and separately clears the local execution ledger. Grounded model advice runs in a separate generation-safe queue and can only cite the server's bounded evidence registry. See [docs/history-and-privacy.md](./docs/history-and-privacy.md) and [docs/grounded-insights.md](./docs/grounded-insights.md).
+
+The API stores only anonymous device-token hashes, applies ownership at every store boundary, rate-limits registration/uploads/general traffic separately, and exposes bounded-label Prometheus metrics. See [docs/security-and-observability.md](./docs/security-and-observability.md).
 
 Run the complete local quality gate:
 

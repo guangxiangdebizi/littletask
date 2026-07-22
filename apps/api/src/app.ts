@@ -4,7 +4,11 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 
 import { loadConfig, type AppConfig } from './config';
+import { AuthenticationError, AuthService } from './auth-service';
 import { DomainError } from './intake-service';
+import { MetricsRegistry } from './metrics';
+import { FixedWindowRateLimiter, RateLimitError } from './rate-limiter';
+import { authRoutes } from './routes/auth';
 import { healthRoutes } from './routes/health';
 import { intakeRoutes } from './routes/intakes';
 import { createIntakeService } from './runtime';
@@ -21,6 +25,7 @@ export interface BuildAppOptions {
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
   const config = options.config ?? loadConfig();
   const app = Fastify({
+    trustProxy: config.TRUST_PROXY,
     logger:
       options.logger === false
         ? false
@@ -52,8 +57,20 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     ...(options.inlineWorker === undefined ? {} : { inlineWorker: options.inlineWorker }),
   });
   app.decorate('appConfig', config);
+  app.decorate('authService', new AuthService(runtime.store));
   app.decorate('intakeService', runtime.service);
+  app.decorate('metrics', new MetricsRegistry());
+  app.decorate('rateLimiter', new FixedWindowRateLimiter());
+  app.decorateRequest('auth', null);
   app.addHook('onClose', async () => runtime.store.close());
+  app.addHook('onResponse', async (request, reply) => {
+    app.metrics.observe(
+      request.method,
+      request.routeOptions.url ?? 'unmatched',
+      reply.statusCode,
+      reply.elapsedTime,
+    );
+  });
 
   await app.register(cors, {
     origin: config.NODE_ENV === 'development' ? true : config.WEB_ORIGIN,
@@ -65,6 +82,17 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof DomainError) {
+      return reply.code(error.statusCode).send({
+        error: { code: error.code, message: error.message, requestId: request.id },
+      });
+    }
+    if (error instanceof AuthenticationError) {
+      return reply.code(error.statusCode).send({
+        error: { code: error.code, message: error.message, requestId: request.id },
+      });
+    }
+    if (error instanceof RateLimitError) {
+      void reply.header('Retry-After', error.retryAfterSeconds);
       return reply.code(error.statusCode).send({
         error: { code: error.code, message: error.message, requestId: request.id },
       });
@@ -101,6 +129,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
 
   await app.register(healthRoutes, { prefix: '/api' });
+  await app.register(authRoutes, { prefix: '/api/v1' });
   await app.register(intakeRoutes, { prefix: '/api/v1' });
   return app;
 }
