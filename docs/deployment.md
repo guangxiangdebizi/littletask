@@ -29,17 +29,20 @@ The bootstrap script downloads the official Node archive and checksum, validates
 it under `/opt` without replacing `/usr/bin/node`. It creates the unprivileged `littletask` user and
 the release/shared directories. Existing PM2 applications continue using the host runtime.
 
-Create the production environment file from the committed template:
+Export the newly rotated key only for the current SSH process, then create the production
+environment atomically:
 
 ```bash
-install -o littletask -g littletask -m 600 \
-  infra/deploy/production.env.example /srv/littletask/shared/.env
+export OPENAI_API_KEY='<rotated-runtime-key>'
+/path/to/checkout/infra/deploy/configure-production-env.sh
+unset OPENAI_API_KEY
 ```
 
-Replace every `CHANGE_ME` value. Use a newly rotated HostCentral key; the key previously pasted into
-chat is not suitable for deployment. Use a URL-safe random database password and put the identical
-value, URL-encoded when necessary, into `DATABASE_URL`. The release script rejects placeholders,
-missing values, the wrong owner, or permissions broader than `0600`.
+The script reads the key without printing it, generates a URL-safe random database password, writes
+the matching `DATABASE_URL`, and atomically installs a `0600` file owned by `littletask`. It refuses
+to replace an existing environment file. The key previously pasted into chat is not suitable for
+deployment. The release script rejects placeholders, missing values, the wrong owner, or permissions
+broader than `0600`.
 
 Release only a full 40-character commit SHA:
 
