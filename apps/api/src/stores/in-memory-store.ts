@@ -1,7 +1,17 @@
 import { randomUUID } from 'node:crypto';
 
-import type { Insight, Intake } from '@littletask/contracts';
+import {
+  activityEventSchema,
+  dataSummarySchema,
+  type ActivityEvent,
+  type ActionType,
+  type DataSummary,
+  type HistoryItem,
+  type Insight,
+  type Intake,
+} from '@littletask/contracts';
 
+import { toHistoryItem } from '../history';
 import type {
   AnalyzeInput,
   ClaimedAnalysisJob,
@@ -10,6 +20,8 @@ import type {
   IntakeStore,
   ModelRunRecord,
   ExecutionObservation,
+  HistoryCursor,
+  HistoryStorePage,
 } from '../types';
 
 interface MemoryJob {
@@ -26,6 +38,22 @@ interface MemoryJob {
 }
 
 interface MemoryExecution extends ExecutionRecordInput {
+  id: string;
+  createdAt: string;
+}
+
+interface MemoryConfirmation {
+  id: string;
+  actionId: string;
+  revision: number;
+  confirmedAt: string;
+}
+
+interface MemoryRevision {
+  id: string;
+  actionId: string;
+  revision: number;
+  source: 'ai' | 'user' | 'system';
   createdAt: string;
 }
 
@@ -45,8 +73,9 @@ function cloneAnalyzeInput(input: AnalyzeInput): AnalyzeInput {
 export class InMemoryIntakeStore implements IntakeStore {
   readonly #intakes = new Map<string, Intake>();
   readonly #insights = new Map<string, Insight[]>();
-  readonly #confirmations = new Map<string, { actionId: string; revision: number }>();
+  readonly #confirmations = new Map<string, MemoryConfirmation>();
   readonly #executions = new Map<string, MemoryExecution>();
+  readonly #revisions: MemoryRevision[] = [];
   readonly #jobs = new Map<string, MemoryJob>();
   readonly #modelRuns: ModelRunRecord[] = [];
 
@@ -81,19 +110,173 @@ export class InMemoryIntakeStore implements IntakeStore {
       .map((intake) => structuredClone(intake));
   }
 
-  async replace(intake: Intake): Promise<void> {
+  async listHistory(input: { limit: number; before?: HistoryCursor }): Promise<HistoryStorePage> {
+    const candidates = [...this.#intakes.values()]
+      .filter(
+        (intake) =>
+          !input.before ||
+          intake.createdAt < input.before.createdAt ||
+          (intake.createdAt === input.before.createdAt && intake.id < input.before.id),
+      )
+      .toSorted(
+        (left, right) =>
+          right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),
+      );
+    const page = candidates.slice(0, input.limit + 1);
+    return {
+      items: page.slice(0, input.limit).map(toHistoryItem),
+      hasMore: page.length > input.limit,
+    };
+  }
+
+  async listActivity(intakeId: string): Promise<ActivityEvent[]> {
+    const intake = this.#intakes.get(intakeId);
+    if (!intake) return [];
+    const actionTypes = new Map(intake.actions.map((action) => [action.id, action.type]));
+    const actionIds = new Set(actionTypes.keys());
+    const events: ActivityEvent[] = [
+      activityEventSchema.parse({
+        id: intake.id,
+        type: 'intake_created',
+        source: 'user',
+        occurredAt: intake.createdAt,
+      }),
+    ];
+
+    const latestModelRun = this.#modelRuns
+      .filter((run) => run.intakeId === intakeId)
+      .toSorted((left, right) => right.completedAt.getTime() - left.completedAt.getTime())[0];
+    if (latestModelRun && ['ready', 'failed'].includes(intake.status)) {
+      events.push(
+        activityEventSchema.parse({
+          id: latestModelRun.id,
+          type: intake.status === 'ready' ? 'analysis_completed' : 'analysis_failed',
+          source: 'ai',
+          ...(latestModelRun.errorCode ? { errorCode: latestModelRun.errorCode } : {}),
+          occurredAt: latestModelRun.completedAt.toISOString(),
+        }),
+      );
+    }
+
+    for (const revision of this.#revisions.filter((item) => actionIds.has(item.actionId))) {
+      events.push(
+        this.activityForAction(actionTypes, {
+          id: revision.id,
+          type: 'action_revised',
+          source: revision.source,
+          actionId: revision.actionId,
+          revision: revision.revision,
+          occurredAt: revision.createdAt,
+        }),
+      );
+    }
+    for (const confirmation of this.#confirmations.values()) {
+      if (!actionIds.has(confirmation.actionId)) continue;
+      events.push(
+        this.activityForAction(actionTypes, {
+          id: confirmation.id,
+          type: 'action_confirmed',
+          source: 'user',
+          actionId: confirmation.actionId,
+          revision: confirmation.revision,
+          occurredAt: confirmation.confirmedAt,
+        }),
+      );
+    }
+    for (const execution of this.#executions.values()) {
+      if (!actionIds.has(execution.actionId)) continue;
+      const errorCode = this.safeErrorCode(execution.errorMessage);
+      events.push(
+        this.activityForAction(actionTypes, {
+          id: execution.id,
+          type: execution.status === 'succeeded' ? 'execution_succeeded' : 'execution_failed',
+          source: 'device',
+          actionId: execution.actionId,
+          ...(errorCode ? { errorCode } : {}),
+          occurredAt: execution.createdAt,
+        }),
+      );
+    }
+    return events
+      .toSorted((left, right) => right.occurredAt.localeCompare(left.occurredAt))
+      .slice(0, 200);
+  }
+
+  async getDataSummary(): Promise<DataSummary> {
+    return dataSummarySchema.parse({
+      intakes: this.#intakes.size,
+      actions: [...this.#intakes.values()].reduce(
+        (total, intake) => total + intake.actions.length,
+        0,
+      ),
+      executionResults: this.#executions.size,
+      insights: [...this.#insights.values()].reduce((total, items) => total + items.length, 0),
+      temporaryScreenshots: [...this.#jobs.values()].filter((job) => job.input !== null).length,
+      screenshotsRetainedAfterAnalysis: false,
+    });
+  }
+
+  async replace(
+    intake: Intake,
+    revisionSource: 'ai' | 'user' | 'system' = 'system',
+  ): Promise<void> {
     if (!this.#intakes.has(intake.id)) {
       throw new Error(`Intake not found: ${intake.id}`);
+    }
+    for (const action of intake.actions) {
+      const exists = this.#revisions.some(
+        (revision) => revision.actionId === action.id && revision.revision === action.revision,
+      );
+      if (!exists) {
+        this.#revisions.push({
+          id: randomUUID(),
+          actionId: action.id,
+          revision: action.revision,
+          source: revisionSource,
+          createdAt: action.updatedAt,
+        });
+      }
     }
     this.#intakes.set(intake.id, structuredClone(intake));
   }
 
   async delete(id: string): Promise<boolean> {
+    const intake = this.#intakes.get(id);
+    if (!intake) return false;
+    const actionIds = new Set(intake.actions.map((action) => action.id));
     this.#insights.delete(id);
     for (const [jobId, job] of this.#jobs) {
       if (job.intakeId === id) this.#jobs.delete(jobId);
     }
+    for (const [key, confirmation] of this.#confirmations) {
+      if (actionIds.has(confirmation.actionId)) this.#confirmations.delete(key);
+    }
+    for (const [key, execution] of this.#executions) {
+      if (actionIds.has(execution.actionId)) this.#executions.delete(key);
+    }
+    this.#revisions.splice(
+      0,
+      this.#revisions.length,
+      ...this.#revisions.filter((revision) => !actionIds.has(revision.actionId)),
+    );
+    this.#modelRuns.splice(
+      0,
+      this.#modelRuns.length,
+      ...this.#modelRuns.filter((run) => run.intakeId !== id),
+    );
     return this.#intakes.delete(id);
+  }
+
+  async deleteAll(): Promise<number> {
+    const count = this.#intakes.size;
+    this.#intakes.clear();
+    this.#insights.clear();
+    this.#confirmations.clear();
+    this.#executions.clear();
+    this.#jobs.clear();
+    this.#revisions.splice(0);
+    this.#modelRuns.splice(0);
+    return count;
   }
 
   async getInsights(intakeId: string): Promise<Insight[]> {
@@ -111,7 +294,12 @@ export class InMemoryIntakeStore implements IntakeStore {
   ): Promise<string> {
     const existing = this.#confirmations.get(idempotencyKey);
     if (existing) return existing.actionId;
-    this.#confirmations.set(idempotencyKey, { actionId, revision });
+    this.#confirmations.set(idempotencyKey, {
+      id: randomUUID(),
+      actionId,
+      revision,
+      confirmedAt: new Date().toISOString(),
+    });
     return actionId;
   }
 
@@ -130,6 +318,7 @@ export class InMemoryIntakeStore implements IntakeStore {
     this.#executions.set(
       input.idempotencyKey,
       structuredClone({
+        id: randomUUID(),
         ...input,
         deviceContext: input.deviceContext ?? emptyDeviceContext,
         createdAt: new Date().toISOString(),
@@ -253,5 +442,19 @@ export class InMemoryIntakeStore implements IntakeStore {
     const job = this.#jobs.get(id);
     if (!job) throw new Error(`Analysis job not found: ${id}`);
     return job;
+  }
+
+  private safeErrorCode(value: string | undefined): string | undefined {
+    return value && /^[A-Z][A-Z0-9_]{1,79}$/.test(value) ? value : undefined;
+  }
+
+  private activityForAction(
+    actionTypes: Map<string, ActionType>,
+    input: Omit<ActivityEvent, 'actionType'> & { actionId: string },
+  ): ActivityEvent {
+    return activityEventSchema.parse({
+      ...input,
+      actionType: actionTypes.get(input.actionId),
+    });
   }
 }

@@ -2,21 +2,31 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import { PrismaPg } from '@prisma/adapter-pg';
 import {
+  actionStatusSchema,
+  actionTypeSchema,
+  activityEventSchema,
   actionCardSchema,
+  dataSummarySchema,
   executionDeviceContextSchema,
+  historyItemSchema,
   insightSchema,
   intakeSchema,
+  type ActivityEvent,
+  type DataSummary,
   type Insight,
   type Intake,
 } from '@littletask/contracts';
 
 import { Prisma, PrismaClient } from '../generated/prisma/client';
+import { historyOutcome, summarizeActions } from '../history';
 import type {
   AnalyzeInput,
   ClaimedAnalysisJob,
   ExecutionRecordInput,
   ExecutionRecord,
   ExecutionObservation,
+  HistoryCursor,
+  HistoryStorePage,
   IntakeStore,
   ModelRunRecord,
 } from '../types';
@@ -147,6 +157,153 @@ export class PrismaIntakeStore implements IntakeStore {
     return rows.map(toDomainIntake);
   }
 
+  async listHistory(input: { limit: number; before?: HistoryCursor }): Promise<HistoryStorePage> {
+    const beforeDate = input.before ? new Date(input.before.createdAt) : null;
+    const rows = await this.prisma.intake.findMany({
+      where:
+        input.before && beforeDate
+          ? {
+              OR: [
+                { createdAt: { lt: beforeDate } },
+                { createdAt: beforeDate, id: { lt: input.before.id } },
+              ],
+            }
+          : undefined,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: input.limit + 1,
+      select: {
+        id: true,
+        status: true,
+        summary: true,
+        createdAt: true,
+        updatedAt: true,
+        actions: { select: { status: true } },
+      },
+    });
+    const items = rows.slice(0, input.limit).map((row) => {
+      const actions = summarizeActions(
+        actionStatusSchema.array().parse(row.actions.map((action) => action.status)),
+      );
+      return historyItemSchema.parse({
+        id: row.id,
+        status: row.status,
+        summary: row.summary,
+        outcome: historyOutcome(row.status, actions),
+        actions,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+      });
+    });
+    return { items, hasMore: rows.length > input.limit };
+  }
+
+  async listActivity(intakeId: string): Promise<ActivityEvent[]> {
+    const [intake, revisions, confirmations, executions, latestModelRun] = await Promise.all([
+      this.prisma.intake.findUnique({
+        where: { id: intakeId },
+        select: { id: true, status: true, createdAt: true },
+      }),
+      this.prisma.actionRevision.findMany({
+        where: { action: { intakeId } },
+        include: { action: { select: { type: true } } },
+      }),
+      this.prisma.actionConfirmation.findMany({
+        where: { action: { intakeId } },
+        include: { action: { select: { type: true } } },
+      }),
+      this.prisma.actionExecution.findMany({
+        where: { action: { intakeId } },
+        include: { action: { select: { type: true } } },
+      }),
+      this.prisma.modelRun.findFirst({
+        where: { intakeId },
+        orderBy: { completedAt: 'desc' },
+      }),
+    ]);
+    if (!intake) return [];
+
+    const events: ActivityEvent[] = [
+      activityEventSchema.parse({
+        id: intake.id,
+        type: 'intake_created',
+        source: 'user',
+        occurredAt: intake.createdAt.toISOString(),
+      }),
+    ];
+    if (latestModelRun && ['ready', 'failed'].includes(intake.status)) {
+      events.push(
+        activityEventSchema.parse({
+          id: latestModelRun.id,
+          type: intake.status === 'ready' ? 'analysis_completed' : 'analysis_failed',
+          source: 'ai',
+          ...(latestModelRun.errorCode ? { errorCode: latestModelRun.errorCode } : {}),
+          occurredAt: latestModelRun.completedAt.toISOString(),
+        }),
+      );
+    }
+    for (const revision of revisions) {
+      events.push(
+        activityEventSchema.parse({
+          id: revision.id,
+          type: 'action_revised',
+          source: revision.source,
+          actionId: revision.actionId,
+          actionType: actionTypeSchema.parse(revision.action.type),
+          revision: revision.revision,
+          occurredAt: revision.createdAt.toISOString(),
+        }),
+      );
+    }
+    for (const confirmation of confirmations) {
+      events.push(
+        activityEventSchema.parse({
+          id: confirmation.id,
+          type: 'action_confirmed',
+          source: 'user',
+          actionId: confirmation.actionId,
+          actionType: actionTypeSchema.parse(confirmation.action.type),
+          revision: confirmation.revision,
+          occurredAt: confirmation.confirmedAt.toISOString(),
+        }),
+      );
+    }
+    for (const execution of executions) {
+      const errorCode = this.safeErrorCode(execution.errorMessage);
+      events.push(
+        activityEventSchema.parse({
+          id: execution.id,
+          type: execution.status === 'succeeded' ? 'execution_succeeded' : 'execution_failed',
+          source: 'device',
+          actionId: execution.actionId,
+          actionType: actionTypeSchema.parse(execution.action.type),
+          ...(errorCode ? { errorCode } : {}),
+          occurredAt: execution.createdAt.toISOString(),
+        }),
+      );
+    }
+    return events
+      .toSorted((left, right) => right.occurredAt.localeCompare(left.occurredAt))
+      .slice(0, 200);
+  }
+
+  async getDataSummary(): Promise<DataSummary> {
+    const [intakes, actions, executionResults, insights, temporaryScreenshots] = await Promise.all([
+      this.prisma.intake.count(),
+      this.prisma.action.count(),
+      this.prisma.actionExecution.count(),
+      this.prisma.insight.count(),
+      this.prisma.analysisJob.count({ where: { imagePayload: { not: null } } }),
+    ]);
+    return dataSummarySchema.parse({
+      intakes,
+      actions,
+      executionResults,
+      insights,
+      temporaryScreenshots,
+      screenshotsRetainedAfterAnalysis: false,
+    });
+  }
+
   async replace(
     intake: Intake,
     revisionSource: 'ai' | 'user' | 'system' = 'system',
@@ -214,6 +371,11 @@ export class PrismaIntakeStore implements IntakeStore {
   async delete(id: string): Promise<boolean> {
     const result = await this.prisma.intake.deleteMany({ where: { id } });
     return result.count > 0;
+  }
+
+  async deleteAll(): Promise<number> {
+    const result = await this.prisma.intake.deleteMany();
+    return result.count;
   }
 
   async getInsights(intakeId: string): Promise<Insight[]> {
@@ -522,5 +684,9 @@ export class PrismaIntakeStore implements IntakeStore {
 
   async close(): Promise<void> {
     await this.prisma.$disconnect();
+  }
+
+  private safeErrorCode(value: string | null): string | undefined {
+    return value && /^[A-Z][A-Z0-9_]{1,79}$/.test(value) ? value : undefined;
   }
 }

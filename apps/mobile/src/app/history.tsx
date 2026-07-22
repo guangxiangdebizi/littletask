@@ -1,181 +1,117 @@
 import { Feather } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Text, View } from 'react-native';
 
 import { AppHeader } from '../components/app-header';
+import { HistoryItemRow } from '../components/history-item';
+import { historyScreenStyles as styles } from '../components/history-screen-styles';
 import { PrimaryButton } from '../components/primary-button';
 import { Screen } from '../components/screen';
-import { getHistory } from '../lib/api';
-import { colors, radii, spacing } from '../theme/tokens';
-
-function formatCreatedAt(value: string): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(value));
-}
+import { deleteIntake, getHistoryPage } from '../lib/api';
+import { colors } from '../theme/tokens';
 
 export default function HistoryScreen() {
-  const historyQuery = useQuery({ queryKey: ['history'], queryFn: getHistory });
+  const queryClient = useQueryClient();
+  const historyQuery = useInfiniteQuery({
+    queryKey: ['history'],
+    queryFn: ({ pageParam }) => getHistoryPage(pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.nextCursor,
+  });
+  const deleteMutation = useMutation({
+    mutationFn: deleteIntake,
+    onSuccess: async (_result, intakeId) => {
+      queryClient.removeQueries({ queryKey: ['intake', intakeId] });
+      queryClient.removeQueries({ queryKey: ['activity', intakeId] });
+      queryClient.removeQueries({ queryKey: ['insights', intakeId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['history'] }),
+        queryClient.invalidateQueries({ queryKey: ['data-summary'] }),
+      ]);
+    },
+  });
+  const items = historyQuery.data?.pages.flatMap((page) => page.items) ?? [];
+
+  const confirmDelete = (intakeId: string, summary: string | null) => {
+    const message = `“${summary ?? '未完成的截图分析'}”的卡片、洞察和执行回报将一起删除。此操作无法撤销。`;
+    if (Platform.OS === 'web') {
+      if (globalThis.confirm(`删除这条处理记录？\n\n${message}`)) {
+        deleteMutation.mutate(intakeId);
+      }
+      return;
+    }
+    Alert.alert('删除这条处理记录？', message, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除记录',
+        style: 'destructive',
+        onPress: () => deleteMutation.mutate(intakeId),
+      },
+    ]);
+  };
 
   return (
     <Screen>
-      <AppHeader back />
+      <AppHeader back title="处理记录" trailing="privacy" />
       <View style={styles.heading}>
         <Text style={styles.title}>处理记录</Text>
-        <Text style={styles.subtitle}>查看截图分析、卡片状态和执行结果。</Text>
+        <Text style={styles.subtitle}>按时间查看结果、执行状态和每次修改的来源。</Text>
       </View>
 
       {historyQuery.isPending ? (
-        <Text style={styles.message}>正在读取记录…</Text>
+        <Text accessibilityLiveRegion="polite" style={styles.message}>
+          正在读取记录…
+        </Text>
       ) : historyQuery.error ? (
         <View style={styles.errorState}>
           <Text style={styles.errorTitle}>历史记录暂时不可用</Text>
-          <Text style={styles.message}>请确认 API 已启动，然后重新读取。</Text>
+          <Text style={styles.message}>请确认网络和 API 状态，然后重新读取。</Text>
           <PrimaryButton
             label="重新读取"
             onPress={() => void historyQuery.refetch()}
             tone="quiet"
           />
         </View>
-      ) : historyQuery.data.length === 0 ? (
+      ) : items.length === 0 ? (
         <View style={styles.emptyState}>
           <View style={styles.emptyIcon}>
             <Feather color={colors.pine} name="inbox" size={22} />
           </View>
           <Text style={styles.emptyTitle}>还没有处理记录</Text>
-          <Text style={styles.message}>上传第一张聊天截图后，分析结果会出现在这里。</Text>
+          <Text style={styles.message}>上传第一张聊天截图后，结构化结果会出现在这里。</Text>
           <PrimaryButton label="开始一次分析" onPress={() => router.replace('/')} />
         </View>
       ) : (
-        <View style={styles.list}>
-          {historyQuery.data.map((intake) => (
-            <Pressable
-              accessibilityHint="打开这次截图分析"
-              accessibilityRole="button"
-              key={intake.id}
-              onPress={() => router.push(`/intake/${intake.id}`)}
-              style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
-            >
-              <View style={styles.itemTop}>
-                <Text numberOfLines={2} style={styles.itemTitle}>
-                  {intake.summary || '正在分析聊天截图'}
-                </Text>
-                <Feather color={colors.faint} name="chevron-right" size={18} />
-              </View>
-              <View style={styles.itemMeta}>
-                <Text style={styles.metaText}>{formatCreatedAt(intake.createdAt)}</Text>
-                <View style={styles.metaDot} />
-                <Text style={styles.metaText}>{intake.actions.length} 个动作</Text>
-                <View style={styles.metaDot} />
-                <Text style={styles.metaText}>{intake.status}</Text>
-              </View>
-            </Pressable>
-          ))}
+        <View style={styles.listSection}>
+          <View accessibilityRole="list" style={styles.list}>
+            {items.map((item) => (
+              <HistoryItemRow
+                deleting={deleteMutation.isPending && deleteMutation.variables === item.id}
+                item={item}
+                key={item.id}
+                onDelete={() => confirmDelete(item.id, item.summary)}
+                onOpen={() => router.push(`/intake/${item.id}`)}
+              />
+            ))}
+          </View>
+          {deleteMutation.error ? (
+            <Text accessibilityLiveRegion="polite" style={styles.deleteError}>
+              记录删除失败，请检查网络后重试。
+            </Text>
+          ) : null}
+          {historyQuery.hasNextPage ? (
+            <PrimaryButton
+              label="加载更早记录"
+              loading={historyQuery.isFetchingNextPage}
+              onPress={() => void historyQuery.fetchNextPage()}
+              tone="quiet"
+            />
+          ) : (
+            <Text style={styles.listEnd}>已显示全部记录</Text>
+          )}
         </View>
       )}
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  heading: {
-    gap: spacing[2],
-    paddingBottom: spacing[6],
-    paddingTop: spacing[8],
-  },
-  title: {
-    color: colors.ink,
-    fontSize: 30,
-    fontWeight: '800',
-    letterSpacing: -0.8,
-  },
-  subtitle: {
-    color: colors.muted,
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  list: {
-    backgroundColor: colors.surface,
-    borderColor: colors.line,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  item: {
-    borderBottomColor: colors.line,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: spacing[3],
-    minHeight: 92,
-    padding: spacing[4],
-  },
-  itemPressed: {
-    backgroundColor: colors.surfaceMuted,
-  },
-  itemTop: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing[3],
-  },
-  itemTitle: {
-    color: colors.ink,
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '700',
-    lineHeight: 21,
-  },
-  itemMeta: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing[2],
-  },
-  metaText: {
-    color: colors.faint,
-    fontSize: 12,
-  },
-  metaDot: {
-    backgroundColor: colors.lineStrong,
-    borderRadius: 2,
-    height: 3,
-    width: 3,
-  },
-  emptyState: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.line,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    gap: spacing[3],
-    padding: spacing[8],
-  },
-  emptyIcon: {
-    alignItems: 'center',
-    backgroundColor: colors.pineSoft,
-    borderRadius: radii.md,
-    height: 48,
-    justifyContent: 'center',
-    width: 48,
-  },
-  emptyTitle: {
-    color: colors.ink,
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  message: {
-    color: colors.muted,
-    fontSize: 14,
-    lineHeight: 21,
-    textAlign: 'center',
-  },
-  errorState: {
-    gap: spacing[3],
-  },
-  errorTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-});

@@ -7,7 +7,7 @@ interface PrimaryButtonProps extends Omit<PressableProps, 'children'> {
   label: string;
   icon?: keyof typeof Feather.glyphMap;
   loading?: boolean;
-  tone?: 'primary' | 'quiet';
+  tone?: 'primary' | 'quiet' | 'danger';
 }
 
 export function PrimaryButton({
@@ -27,21 +27,25 @@ export function PrimaryButton({
       disabled={isDisabled}
       style={(state) => [
         styles.base,
-        tone === 'primary' ? styles.primary : styles.quiet,
+        tone === 'primary' ? styles.primary : tone === 'danger' ? styles.danger : styles.quiet,
         state.pressed &&
           !isDisabled &&
-          (tone === 'primary' ? styles.primaryPressed : styles.quietPressed),
+          (tone === 'primary'
+            ? styles.primaryPressed
+            : tone === 'danger'
+              ? styles.dangerPressed
+              : styles.quietPressed),
         isDisabled && styles.disabled,
         typeof style === 'function' ? style(state) : style,
       ]}
       {...props}
     >
       {loading ? (
-        <ActivityIndicator color={tone === 'primary' ? colors.surface : colors.ink} />
+        <ActivityIndicator color={tone === 'quiet' ? colors.ink : colors.surface} />
       ) : icon ? (
-        <Feather color={tone === 'primary' ? colors.surface : colors.ink} name={icon} size={18} />
+        <Feather color={tone === 'quiet' ? colors.ink : colors.surface} name={icon} size={18} />
       ) : null}
-      <Text style={[styles.label, tone === 'primary' ? styles.primaryLabel : styles.quietLabel]}>
+      <Text style={[styles.label, tone === 'quiet' ? styles.quietLabel : styles.primaryLabel]}>
         {label}
       </Text>
     </Pressable>
@@ -71,6 +75,12 @@ const styles = StyleSheet.create({
   },
   quietPressed: {
     backgroundColor: colors.pineSoft,
+  },
+  danger: {
+    backgroundColor: colors.coral,
+  },
+  dangerPressed: {
+    backgroundColor: colors.coralPressed,
   },
   disabled: {
     opacity: 0.48,

@@ -4,13 +4,14 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Platform, Text, View } from 'react-native';
 
 import { ActionCard } from '../../components/action-card';
+import { ActivityTimeline } from '../../components/activity-timeline';
 import { AnalysisProgress } from '../../components/analysis-progress';
 import { AppHeader } from '../../components/app-header';
 import { InsightRow } from '../../components/insight-row';
 import { intakeResultStyles as styles } from '../../components/intake-result-styles';
 import { PrimaryButton } from '../../components/primary-button';
 import { Screen } from '../../components/screen';
-import { ApiRequestError, getInsights, getIntake } from '../../lib/api';
+import { ApiRequestError, getActivity, getInsights, getIntake } from '../../lib/api';
 import { colors } from '../../theme/tokens';
 
 export default function IntakeResultScreen() {
@@ -32,6 +33,11 @@ export default function IntakeResultScreen() {
     queryKey: ['insights', intakeId],
     queryFn: () => getInsights(intakeId ?? ''),
     enabled: Boolean(intakeId && hasExecutedAction),
+  });
+  const activityQuery = useQuery({
+    queryKey: ['activity', intakeId],
+    queryFn: () => getActivity(intakeId ?? ''),
+    enabled: Boolean(intakeId && intake && ['ready', 'failed'].includes(intake.status)),
   });
 
   if (!intakeId) {
@@ -169,6 +175,16 @@ export default function IntakeResultScreen() {
           ) : (
             <Text style={styles.loadingInsights}>当前没有额外建议。</Text>
           )}
+        </View>
+      ) : null}
+
+      {activityQuery.data && activityQuery.data.length > 0 ? (
+        <View style={styles.insightsSection}>
+          <View style={styles.insightHeading}>
+            <Text style={styles.sectionTitle}>活动记录</Text>
+            <Text style={styles.sectionHint}>最新变化在前</Text>
+          </View>
+          <ActivityTimeline events={activityQuery.data} />
         </View>
       ) : null}
     </Screen>

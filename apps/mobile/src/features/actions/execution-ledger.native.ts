@@ -229,4 +229,9 @@ export const executionLedger: ExecutionLedger = {
     if (!result) throw new Error('Could not store device execution context');
     return result;
   },
+
+  async clearAll() {
+    const db = await database();
+    await db.runAsync('DELETE FROM action_execution_ledger');
+  },
 };

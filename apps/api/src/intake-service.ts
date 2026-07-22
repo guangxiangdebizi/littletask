@@ -2,16 +2,22 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import {
   actionCardSchema,
+  activityResponseSchema,
+  clearAllDataResponseSchema,
   contactPayloadSchema,
+  historyPageSchema,
   meetingPayloadSchema,
   updateContactPayloadSchema,
   type ActionCard,
   type ActionPatchRequest,
   type AnalysisDraft,
   type ExecutionResultRequest,
+  type HistoryPage,
+  type HistoryQuery,
   type Intake,
 } from '@littletask/contracts';
 import { assertActionTransition, deriveInsights } from '@littletask/domain';
+import { z } from 'zod';
 
 import type {
   AIProvider,
@@ -64,6 +70,11 @@ const retryableAnalysisErrors = new Set([
   'MODEL_GATEWAY_UNAVAILABLE',
   'MODEL_RATE_LIMITED',
 ]);
+
+const historyCursorSchema = z.object({
+  createdAt: z.string().datetime({ offset: true }),
+  id: z.string().uuid(),
+});
 
 export class IntakeService {
   private readonly options: IntakeServiceOptions;
@@ -119,10 +130,45 @@ export class IntakeService {
     return this.store.list();
   }
 
+  async listHistory(request: HistoryQuery): Promise<HistoryPage> {
+    const before = request.cursor ? this.decodeHistoryCursor(request.cursor) : undefined;
+    const page = await this.store.listHistory({
+      limit: request.limit,
+      ...(before ? { before } : {}),
+    });
+    const tail = page.items.at(-1);
+    return historyPageSchema.parse({
+      items: page.items,
+      nextCursor:
+        page.hasMore && tail
+          ? Buffer.from(JSON.stringify({ createdAt: tail.createdAt, id: tail.id })).toString(
+              'base64url',
+            )
+          : null,
+    });
+  }
+
+  async getActivity(intakeId: string) {
+    await this.get(intakeId);
+    return activityResponseSchema.parse({
+      items: await this.store.listActivity(intakeId),
+    });
+  }
+
+  getDataSummary() {
+    return this.store.getDataSummary();
+  }
+
   async delete(id: string): Promise<void> {
     if (!(await this.store.delete(id))) {
       throw new DomainError('INTAKE_NOT_FOUND', 'Intake not found', 404);
     }
+  }
+
+  async deleteAll() {
+    return clearAllDataResponseSchema.parse({
+      deletedIntakes: await this.store.deleteAll(),
+    });
   }
 
   async patchAction(actionId: string, request: ActionPatchRequest): Promise<ActionCard> {
@@ -301,6 +347,16 @@ export class IntakeService {
         { createId: randomUUID, now: () => new Date() },
       ),
     );
+  }
+
+  private decodeHistoryCursor(value: string) {
+    try {
+      return historyCursorSchema.parse(
+        JSON.parse(Buffer.from(value, 'base64url').toString('utf8')),
+      );
+    } catch {
+      throw new DomainError('INVALID_HISTORY_CURSOR', 'History cursor is invalid', 400);
+    }
   }
 
   async processNextJob(workerId: string, staleAfterMs = this.options.jobLeaseMs): Promise<boolean> {

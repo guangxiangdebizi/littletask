@@ -1,4 +1,4 @@
-import type { ActionCard, Insight } from '@littletask/contracts';
+import type { ActionCard, ActivityEvent, DataSummary, Insight } from '@littletask/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { buildApp } from './app';
@@ -209,6 +209,43 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
         expect.objectContaining({ type: 'duplicate_contact', kind: 'observation' }),
       ]),
     );
+
+    const activity = await apiSecondRestart.inject({
+      method: 'GET',
+      url: `/api/v1/intakes/${id}/activity`,
+    });
+    expect(activity.json<{ items: ActivityEvent[] }>().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'analysis_completed', source: 'ai' }),
+        expect.objectContaining({ type: 'action_revised', source: 'ai', revision: 1 }),
+        expect.objectContaining({ type: 'action_confirmed', actionId: action.id }),
+        expect.objectContaining({ type: 'execution_succeeded', actionId: action.id }),
+      ]),
+    );
+
+    const deleted = await apiSecondRestart.inject({
+      method: 'DELETE',
+      url: `/api/v1/intakes/${id}`,
+    });
+    expect(deleted.statusCode).toBe(204);
+    const actionIds = intake.actions.map((item) => item.id);
+    expect(
+      await Promise.all([
+        prisma.intake.count({ where: { id } }),
+        prisma.action.count({ where: { intakeId: id } }),
+        prisma.actionRevision.count({ where: { actionId: { in: actionIds } } }),
+        prisma.actionConfirmation.count({ where: { actionId: { in: actionIds } } }),
+        prisma.actionExecution.count({ where: { actionId: { in: actionIds } } }),
+        prisma.insight.count({ where: { intakeId: id } }),
+        prisma.modelRun.count({ where: { intakeId: id } }),
+        prisma.analysisJob.count({ where: { intakeId: id } }),
+      ]),
+    ).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(
+      (
+        await apiSecondRestart.inject({ method: 'GET', url: '/api/v1/data-summary' })
+      ).json<DataSummary>(),
+    ).toMatchObject({ intakes: 0, actions: 0, executionResults: 0, insights: 0 });
     await apiSecondRestart.close();
   });
 

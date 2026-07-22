@@ -1,4 +1,12 @@
-import type { AnalysisDraft, ExecutionDeviceContext, Insight, Intake } from '@littletask/contracts';
+import type {
+  ActivityEvent,
+  AnalysisDraft,
+  DataSummary,
+  ExecutionDeviceContext,
+  HistoryItem,
+  Insight,
+  Intake,
+} from '@littletask/contracts';
 
 export interface AnalyzeInput {
   image: Buffer;
@@ -59,12 +67,26 @@ export interface ExecutionObservation {
   createdAt: string;
 }
 
+export interface HistoryCursor {
+  createdAt: string;
+  id: string;
+}
+
+export interface HistoryStorePage {
+  items: HistoryItem[];
+  hasMore: boolean;
+}
+
 export interface IntakeStore {
   create(intake: Intake, analysisInput: AnalyzeInput, maxAttempts: number): Promise<void>;
   get(id: string): Promise<Intake | undefined>;
   list(): Promise<Intake[]>;
+  listHistory(input: { limit: number; before?: HistoryCursor }): Promise<HistoryStorePage>;
+  listActivity(intakeId: string): Promise<ActivityEvent[]>;
+  getDataSummary(): Promise<DataSummary>;
   replace(intake: Intake, revisionSource?: 'ai' | 'user' | 'system'): Promise<void>;
   delete(id: string): Promise<boolean>;
+  deleteAll(): Promise<number>;
   getInsights(intakeId: string): Promise<Insight[]>;
   setInsights(intakeId: string, insights: Insight[]): Promise<void>;
   rememberConfirmation(idempotencyKey: string, actionId: string, revision: number): Promise<string>;

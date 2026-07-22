@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { actionProposalSchema, analysisDraftSchema } from './index';
+import {
+  actionProposalSchema,
+  activityResponseSchema,
+  analysisDraftSchema,
+  historyPageSchema,
+} from './index';
 
 describe('action contracts', () => {
   it('accepts a grounded meeting proposal', () => {
@@ -45,5 +50,46 @@ describe('action contracts', () => {
     });
 
     expect(result.success).toBe(false);
+  });
+
+  it('accepts a paginated history summary and structured provenance event', () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    expect(
+      historyPageSchema.safeParse({
+        items: [
+          {
+            id,
+            status: 'ready',
+            summary: '约好明天下午见面。',
+            outcome: 'partial',
+            actions: {
+              total: 2,
+              needsReview: 0,
+              confirmed: 0,
+              succeeded: 1,
+              failed: 0,
+            },
+            createdAt: '2026-07-22T06:00:00.000Z',
+            updatedAt: '2026-07-22T06:05:00.000Z',
+          },
+        ],
+        nextCursor: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      activityResponseSchema.safeParse({
+        items: [
+          {
+            id,
+            type: 'action_revised',
+            source: 'user',
+            actionId: '22222222-2222-4222-8222-222222222222',
+            actionType: 'create_event',
+            revision: 2,
+            occurredAt: '2026-07-22T06:05:00.000Z',
+          },
+        ],
+      }).success,
+    ).toBe(true);
   });
 });

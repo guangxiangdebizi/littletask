@@ -14,15 +14,17 @@ After confirmed actions are executed, LittleTask uses the relevant contact, cale
 
 ## Status
 
-The project is in active development. The first vertical slice is available with a deterministic fake AI provider:
+The project is in active development. The first vertical slice includes:
 
 - Upload a screenshot and optional note
 - Receive three grounded Action Card types
 - Confirm a stable action revision
 - Simulate execution in the Web acceptance build
-- Receive deterministic follow-up insights
+- Receive grounded follow-up insights
+- Review cursor-paginated history and action provenance
+- Delete one intake or all retained server-side data
 
-The GPT-5.6 Terra provider is implemented behind an environment switch with stateless analysis and review requests. PostgreSQL persists the complete intake/action audit trail and feeds a restart-safe standalone analysis worker. The iOS client now includes editable revision-bound cards, local contact matching, calendar conflict checks, native Contacts/Calendar adapters, and a SQLite execution ledger. Its iOS JavaScript bundle passes locally; an EAS build and physical-device acceptance remain before TestFlight. A rotated runtime credential is still required for the live gateway compatibility check. The full product and delivery plan is documented in [plan.md](./plan.md).
+The GPT-5.6 Terra provider is implemented with stateless analysis and review requests. PostgreSQL persists the complete intake/action audit trail and feeds a restart-safe standalone analysis worker. The iOS client includes editable revision-bound cards, local contact matching, calendar conflict checks, native Contacts/Calendar adapters, a SQLite execution ledger, history provenance, and privacy controls. Its iOS JavaScript bundle passes locally; an EAS build and physical-device acceptance remain before TestFlight. A rotated runtime credential is still required for the live gateway compatibility check. The full product and delivery plan is documented in [plan.md](./plan.md).
 
 ## Stack
 
@@ -86,6 +88,8 @@ corepack pnpm dev:api
 Start `corepack pnpm dev:worker` in another terminal. See [docs/persistence.md](./docs/persistence.md) for the queue lifecycle, isolated PostgreSQL integration suite, and PM2 process topology.
 
 Native execution is never performed by the Web acceptance build. See [docs/native-execution.md](./docs/native-execution.md) for permission timing, confirmation ordering, duplicate/conflict checks, crash recovery, and the physical-device test checklist.
+
+History returns compact summaries through an opaque cursor rather than downloading every intake. Each intake exposes a provenance timeline for AI revisions, user edits and confirmations, and device results. The privacy page shows retained counts, deletes a single intake or all server-side records, and separately clears the local execution ledger. See [docs/history-and-privacy.md](./docs/history-and-privacy.md).
 
 Run the complete local quality gate:
 

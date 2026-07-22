@@ -119,4 +119,11 @@ export const executionLedger: ExecutionLedger = {
     saveEntries(entries);
     return updated;
   },
+
+  async clearAll() {
+    memoryEntries.clear();
+    if (typeof globalThis.localStorage !== 'undefined') {
+      globalThis.localStorage.removeItem(storageKey);
+    }
+  },
 };

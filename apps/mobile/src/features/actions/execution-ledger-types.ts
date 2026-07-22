@@ -32,6 +32,7 @@ export interface ExecutionLedger {
     entry: ExecutionLedgerEntry,
     context: ExecutionDeviceContext,
   ): Promise<ExecutionLedgerEntry>;
+  clearAll(): Promise<void>;
 }
 
 export function ledgerKey(actionId: string, revision: number): string {

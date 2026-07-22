@@ -1,12 +1,20 @@
 import {
   actionCardSchema,
+  activityResponseSchema,
+  clearAllDataResponseSchema,
   createIntakeResponseSchema,
+  dataSummarySchema,
+  historyPageSchema,
   insightSchema,
   intakeSchema,
   type ActionCard,
   type ActionPatchRequest,
+  type ActivityEvent,
+  type ClearAllDataResponse,
   type CreateIntakeResponse,
   type ExecutionDeviceContext,
+  type DataSummary,
+  type HistoryPage,
   type Insight,
   type Intake,
 } from '@littletask/contracts';
@@ -101,9 +109,25 @@ export async function getIntake(id: string): Promise<Intake> {
   return intakeSchema.parse(await requestJson(`/intakes/${id}`));
 }
 
-export async function getHistory(): Promise<Intake[]> {
-  const response = (await requestJson('/history')) as { items?: unknown[] };
-  return intakeSchema.array().parse(response.items ?? []);
+export async function getHistoryPage(cursor: string | null = null): Promise<HistoryPage> {
+  const query = `limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+  return historyPageSchema.parse(await requestJson(`/history?${query}`));
+}
+
+export async function getActivity(intakeId: string): Promise<ActivityEvent[]> {
+  return activityResponseSchema.parse(await requestJson(`/intakes/${intakeId}/activity`)).items;
+}
+
+export async function deleteIntake(intakeId: string): Promise<void> {
+  await requestJson(`/intakes/${intakeId}`, { method: 'DELETE' });
+}
+
+export async function getDataSummary(): Promise<DataSummary> {
+  return dataSummarySchema.parse(await requestJson('/data-summary'));
+}
+
+export async function clearAllData(): Promise<ClearAllDataResponse> {
+  return clearAllDataResponseSchema.parse(await requestJson('/history', { method: 'DELETE' }));
 }
 
 export async function patchAction(

@@ -17,6 +17,7 @@ export const colors = {
   blue: '#315F87',
   blueSoft: '#E2ECF4',
   coral: '#A84F3E',
+  coralPressed: '#823C30',
   coralSoft: '#F8E4DF',
   transparent: 'transparent',
 } as const;

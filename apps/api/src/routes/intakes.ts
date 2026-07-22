@@ -2,6 +2,7 @@ import {
   actionConfirmationRequestSchema,
   actionPatchRequestSchema,
   executionResultRequestSchema,
+  historyQuerySchema,
 } from '@littletask/contracts';
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -85,7 +86,13 @@ export const intakeRoutes: FastifyPluginAsync = async (app) => {
     app.intakeService.get(request.params.id),
   );
 
-  app.get('/history', async () => ({ items: await app.intakeService.list() }));
+  app.get('/history', async (request) =>
+    app.intakeService.listHistory(historyQuerySchema.parse(request.query)),
+  );
+
+  app.delete('/history', async () => app.intakeService.deleteAll());
+
+  app.get('/data-summary', async () => app.intakeService.getDataSummary());
 
   app.delete<{ Params: IntakeParams }>('/intakes/:id', async (request, reply) => {
     await app.intakeService.delete(request.params.id);
@@ -114,4 +121,8 @@ export const intakeRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Params: IntakeParams }>('/intakes/:id/insights', async (request) => ({
     items: await app.intakeService.getInsights(request.params.id),
   }));
+
+  app.get<{ Params: IntakeParams }>('/intakes/:id/activity', async (request) =>
+    app.intakeService.getActivity(request.params.id),
+  );
 };

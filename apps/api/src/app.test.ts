@@ -1,6 +1,12 @@
 import { setTimeout as wait } from 'node:timers/promises';
 
-import type { ActionCard, Insight } from '@littletask/contracts';
+import type {
+  ActionCard,
+  ActivityEvent,
+  DataSummary,
+  HistoryPage,
+  Insight,
+} from '@littletask/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { buildApp } from './app';
@@ -258,6 +264,99 @@ describe('LittleTask API', () => {
         }),
       ]),
     );
+
+    const activity = await app.inject({
+      method: 'GET',
+      url: `/api/v1/intakes/${id}/activity`,
+    });
+    expect(activity.statusCode).toBe(200);
+    expect(activity.json<{ items: ActivityEvent[] }>().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'analysis_completed', source: 'ai' }),
+        expect.objectContaining({
+          type: 'action_revised',
+          source: 'user',
+          actionId: action.id,
+          revision: 2,
+        }),
+        expect.objectContaining({ type: 'action_confirmed', actionId: action.id }),
+        expect.objectContaining({ type: 'execution_succeeded', actionId: action.id }),
+      ]),
+    );
+
+    const removed = await app.inject({ method: 'DELETE', url: `/api/v1/intakes/${id}` });
+    expect(removed.statusCode).toBe(204);
+    expect((await app.inject({ method: 'GET', url: `/api/v1/intakes/${id}` })).statusCode).toBe(
+      404,
+    );
+    const afterDelete = await app.inject({ method: 'GET', url: '/api/v1/data-summary' });
+    expect(afterDelete.json<DataSummary>()).toMatchObject({
+      intakes: 0,
+      actions: 0,
+      executionResults: 0,
+      insights: 0,
+      temporaryScreenshots: 0,
+      screenshotsRetainedAfterAnalysis: false,
+    });
+
+    await app.close();
+  });
+
+  it('paginates history with an opaque cursor and can clear all server data', async () => {
+    const app = await buildApp({
+      config: loadConfig({ NODE_ENV: 'test', AI_PROVIDER: 'fake', LOG_LEVEL: 'silent' }),
+      logger: false,
+      inlineWorker: false,
+    });
+    const ids: string[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      const upload = multipartScreenshot();
+      const created = await app.inject({
+        method: 'POST',
+        url: '/api/v1/intakes',
+        headers: { 'content-type': upload.contentType },
+        payload: upload.payload,
+      });
+      ids.push(created.json<{ id: string }>().id);
+    }
+
+    const firstPage = (
+      await app.inject({ method: 'GET', url: '/api/v1/history?limit=2' })
+    ).json<HistoryPage>();
+    expect(firstPage.items).toHaveLength(2);
+    expect(firstPage.nextCursor).toBeTruthy();
+    const secondPage = (
+      await app.inject({
+        method: 'GET',
+        url: `/api/v1/history?limit=2&cursor=${encodeURIComponent(firstPage.nextCursor ?? '')}`,
+      })
+    ).json<HistoryPage>();
+    expect(secondPage.items).toHaveLength(1);
+    expect(secondPage.nextCursor).toBeNull();
+    expect(new Set([...firstPage.items, ...secondPage.items].map((item) => item.id))).toEqual(
+      new Set(ids),
+    );
+
+    const invalidCursor = await app.inject({
+      method: 'GET',
+      url: '/api/v1/history?cursor=not-a-valid-cursor',
+    });
+    expect(invalidCursor.statusCode).toBe(400);
+    expect(invalidCursor.json<{ error: { code: string } }>().error.code).toBe(
+      'INVALID_HISTORY_CURSOR',
+    );
+
+    const summary = (
+      await app.inject({ method: 'GET', url: '/api/v1/data-summary' })
+    ).json<DataSummary>();
+    expect(summary).toMatchObject({ intakes: 3, actions: 0, temporaryScreenshots: 3 });
+
+    const cleared = await app.inject({ method: 'DELETE', url: '/api/v1/history' });
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.json<{ deletedIntakes: number }>().deletedIntakes).toBe(3);
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/v1/data-summary' })).json<DataSummary>(),
+    ).toMatchObject({ intakes: 0, temporaryScreenshots: 0 });
 
     await app.close();
   });

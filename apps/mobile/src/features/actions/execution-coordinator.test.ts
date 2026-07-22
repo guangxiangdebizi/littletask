@@ -105,6 +105,10 @@ class MemoryLedger implements ExecutionLedger {
     this.entry = { ...entry, deviceContext: context };
     return this.entry;
   }
+
+  async clearAll() {
+    this.entry = null;
+  }
 }
 
 function createGateway(events: string[]) {
