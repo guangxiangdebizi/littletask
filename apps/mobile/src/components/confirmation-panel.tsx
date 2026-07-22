@@ -32,7 +32,6 @@ function Acknowledgement({
 
 export function ConfirmationPanel({
   action,
-  simulated,
   duplicateWarning,
   conflictWarning,
   duplicateAccepted,
@@ -43,7 +42,6 @@ export function ConfirmationPanel({
   onExecute,
 }: {
   action: ActionCard;
-  simulated: boolean;
   duplicateWarning: boolean;
   conflictWarning: boolean;
   duplicateAccepted: boolean;
@@ -64,7 +62,7 @@ export function ConfirmationPanel({
         <View style={styles.headerCopy}>
           <Text style={styles.title}>最终确认 · 版本 {action.revision}</Text>
           <Text style={styles.subtitle}>
-            下方是将要{simulated ? '模拟处理' : '写入设备'}的完整内容。确认后此版本不能再编辑。
+            下方是将要写入设备的完整内容。确认后此版本不能再编辑。
           </Text>
         </View>
       </View>
@@ -72,6 +70,9 @@ export function ConfirmationPanel({
       {action.type === 'create_event' && action.payload.attendees.length > 0 ? (
         <Text style={styles.footnote}>参与人会写入备注作为参考，不会自动发送日历邀请。</Text>
       ) : null}
+      <Text style={styles.footnote}>
+        确认后，仅与本卡片匹配的联系人摘要会用于生成建议，不会上传整本通讯录或具体号码。
+      </Text>
       {duplicateWarning ? (
         <Acknowledgement
           checked={duplicateAccepted}
@@ -89,9 +90,7 @@ export function ConfirmationPanel({
       <PrimaryButton
         disabled={!accepted}
         icon="check"
-        label={
-          simulated ? `确认版本 ${action.revision} 并模拟` : `确认版本 ${action.revision} 并写入`
-        }
+        label={`确认版本 ${action.revision} 并写入`}
         loading={executing}
         onPress={onExecute}
       />

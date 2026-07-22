@@ -49,7 +49,7 @@ const environmentSchema = z
       .max(60 * 60_000)
       .default(60_000),
     IMAGE_RETENTION: z.literal('none').default('none'),
-    AI_PROVIDER: z.enum(['fake', 'openai']).default('openai'),
+    AI_PROVIDER: z.literal('openai').default('openai'),
     OPENAI_BASE_URL: z.literal('https://api.hostcentral.cc').default('https://api.hostcentral.cc'),
     OPENAI_WIRE_API: z.literal('responses').default('responses'),
     OPENAI_API_KEY: optionalSecretSchema,
@@ -63,15 +63,7 @@ const environmentSchema = z
     AI_NETWORK_ACCESS: z.literal('enabled').default('enabled'),
   })
   .superRefine((value, context) => {
-    if (value.NODE_ENV !== 'test' && value.AI_PROVIDER !== 'openai') {
-      context.addIssue({
-        code: 'custom',
-        message: 'The fake AI provider is restricted to NODE_ENV=test',
-        path: ['AI_PROVIDER'],
-      });
-    }
-
-    if (value.AI_PROVIDER === 'openai' && !value.OPENAI_API_KEY) {
+    if (!value.OPENAI_API_KEY) {
       context.addIssue({
         code: 'custom',
         message: 'OPENAI_API_KEY is required when AI_PROVIDER=openai',

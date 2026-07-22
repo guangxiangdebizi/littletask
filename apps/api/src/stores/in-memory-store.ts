@@ -82,6 +82,7 @@ interface MemoryRevision {
 const emptyDeviceContext = {
   possibleDuplicateContactCount: 0,
   calendarConflictCount: 0,
+  relatedContacts: [],
 };
 
 function cloneAnalyzeInput(input: AnalyzeInput): AnalyzeInput {

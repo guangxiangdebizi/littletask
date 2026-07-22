@@ -16,7 +16,7 @@ The engine recalculates the intake's rule-generated insights after confirmation 
 
 ## Asynchronous model suggestions
 
-After at least one action succeeds, the API builds a bounded evidence registry from the deterministic insights. Each entry receives a server-generated ID such as `E1`; the model receives only succeeded action IDs/types, the intake summary, and those registered evidence values. It cannot read device contact candidates, calendar item details, or the original screenshot during this stage.
+After at least one action succeeds, the API builds a bounded evidence registry from the deterministic insights. Each entry receives a server-generated ID such as `E1`; the insight workspace receives only succeeded action IDs/types, the intake summary, and those registered evidence values. It cannot read the full device candidate list, concrete phone/email values, calendar item details, or the original screenshot during this stage.
 
 The suggestion worker may return at most four `meeting_preparation`, `follow_up`, or `reply_suggestion` items. Deterministic validation rejects unknown action IDs, invented evidence IDs, malformed items, and duplicates before persistence. Accepted items are stored with `kind=suggestion` and `generator=model` so the UI can distinguish them from rule output.
 
@@ -32,7 +32,7 @@ Evidence uses a closed source vocabulary: `action`, `screenshot`, `note`, `conta
 
 ## Privacy boundary
 
-The device context contains only `possibleDuplicateContactCount` and `calendarConflictCount`, each restricted to `0..8`. It never contains local contact names, phone numbers, email addresses, calendar titles, event titles, or event times. Historical matching is performed only against structured LittleTask records already stored for the user.
+The device context contains `possibleDuplicateContactCount` and `calendarConflictCount`, each restricted to `0..8`, plus up to eight contact summaries explicitly submitted with the confirmed action result. A summary contains display name, company, job title, and phone/email-presence booleans. It never contains concrete phone numbers, email addresses, a full address-book export, calendar titles, event titles, or event times. Historical matching is performed only against structured LittleTask records already stored for the user.
 
 ## Verification
 

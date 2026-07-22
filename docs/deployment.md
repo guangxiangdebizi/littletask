@@ -139,11 +139,10 @@ testing components in isolation:
 3. Check public HTTPS, `/webmail/`, liveness/readiness, security headers, and public metrics denial.
    Confirm `/privacy-policy` and `/api/openapi.json` return the committed release content.
 4. Run `corepack pnpm check` against the same Git SHA.
-5. Run the synthetic eval through the public authenticated API, persistent queue, worker, and real
-   HostCentral model.
-6. Upload the ignored private screenshot through the same API and remove its intake/account after
+5. Upload the ignored private screenshot through the public authenticated API, persistent queue,
+   worker, and real HostCentral model; remove its intake/account after
    reviewing the result.
-7. Confirm PM2/worker restart recovery, backup creation, recovery restore, and code rollback.
+6. Confirm PM2/worker restart recovery, backup creation, recovery restore, and code rollback.
 
 Never print the environment file, bearer tokens, screenshot content, model response bodies, contact
 data, or database dumps into deployment logs or CI artifacts.

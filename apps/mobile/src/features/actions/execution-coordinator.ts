@@ -61,6 +61,7 @@ export class ActionExecutionCoordinator {
           action.type === 'create_contact' ? preparation.contacts.length : 0,
         calendarConflictCount:
           action.type === 'create_event' ? preparation.calendarConflicts.length : 0,
+        relatedContacts: preparation.relatedContacts,
       });
     }
     if (!preparation) {

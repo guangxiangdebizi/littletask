@@ -9,20 +9,20 @@
 
 - [x] 创建 GitHub 公开仓库：[`guangxiangdebizi/littletask`](https://github.com/guangxiangdebizi/littletask)。
 - [x] 初始化 TypeScript monorepo、CI、共享契约、领域状态机和安全边界。
-- [x] 完成 React Native / Expo Web 可运行客户端；Fake AI 仅保留在自动化测试环境。
+- [x] 完成 React Native / Expo Web 可运行客户端；Web 不提供联系人或日历伪执行。
 - [x] 完成 Fastify API、上传校验、确认门禁、幂等执行接口和历史接口。
 - [x] 接入 PostgreSQL / Prisma 持久化、可恢复异步任务队列和独立 PM2 worker。
-- [x] 实现 GPT-5.6 Terra 多模态分析、Structured Outputs、独立复核和安全错误边界。
-- [ ] 更换已暴露的测试密钥后，完成真实网关兼容性与质量样例测试。
+- [x] 实现 GPT-5.6 Terra 多模态 LangGraph ReAct agent、独立 action workspace、复核和安全错误边界。
+- [ ] 使用 Git 忽略的私有截图完成公网真实 API 质量验收。
 - [x] 接入 iOS Contacts / Calendar 原生执行、本地冲突/重复项检查和 SQLite 执行账本。
 - [x] 完成基于已确认动作、设备核对计数和应用历史的可追溯确定性洞察。
 - [x] 完成结构化历史分页、活动来源、完整级联删除和隐私数据控制。
 - [x] 完成证据约束的异步 AI 建议。
 - [x] 完成匿名设备鉴权、逐用户数据隔离、账户删除、请求限流和基础指标。
-- [x] 完成模型响应 ID / Token 用量审计和只走真实后端链路的脱敏 AI eval。
+- [x] 完成模型响应 ID / Token 用量审计；移除合成 AI eval 与 provider probe。
 - [x] 完成 EAS development / preview / production 配置、iOS 隐私清单和发布手册。
 - [x] 完成 Node 22 隔离运行时、不可变发布、PM2、PostgreSQL、Nginx、备份和回滚配置。
-- [x] 完成公开隐私政策、OpenAPI 3.1 文档和完整脱敏 AI eval 场景集。
+- [x] 完成公开隐私政策和 OpenAPI 3.1 文档。
 - [ ] 完成 EAS 真机测试和 TestFlight。
 - [x] 完成 `manbaout.com` Nginx / SSL / PM2 / PostgreSQL 部署和备份恢复演练。
 
@@ -32,16 +32,13 @@ PostgreSQL 17 和现有有效证书；原 Roundcube Webmail 保留在 `/webmail/
 返回真实 `openai` provider，OpenAPI 和隐私政策已发布，公网指标端点被拒绝。每日备份 timer
 已启用，首份备份已在隔离 PostgreSQL 容器中以 4 个迁移和一致行数完成恢复演练。
 
-当前原生执行模块已完成代码和自动化验证：三类卡片可编辑并绑定 revision；权限只在用户主动设备核对时请求；联系人消歧、日历冲突、最终确认、SQLite 防重复账本、失败重试和不确定结果恢复已接通；Web 明确使用模拟适配器；iOS JavaScript bundle 已通过。尚未把“真机写入”标记为验收通过，需在 EAS/TestFlight 构建后用测试联系人和测试日历回归。
+当前原生执行模块已完成代码和自动化验证：三类卡片可编辑并绑定 revision；权限只在用户主动设备核对时请求；联系人消歧、日历冲突、最终确认、SQLite 防重复账本、失败重试和不确定结果恢复已接通；Web 只能查看和编辑卡片，执行路径会被明确阻止；iOS JavaScript bundle 已通过。尚未把“真机写入”标记为验收通过，需在 EAS/TestFlight 构建后用专用联系人和日历回归。
 
-当前洞察模块已完成：确认或执行结果变化后会重新计算规则事实与建议；日历冲突、潜在重复联系人、执行失败、缺失字段和相关应用历史均带结构化依据；设备只上传两个不超过 8 的计数，不上传联系人候选或日历事件明细。动作成功后，独立持久化队列把服务端编号后的证据注册表交给模型，模型只能返回引用现有 action/evidence ID 的建议；输入 hash、generation 和行锁阻止重复任务及旧响应覆盖新上下文，模型失败不会删除规则洞察。历史模块使用不透明游标分页并展示 AI、用户、系统和设备来源；单条或全部删除会级联移除版本、确认、执行、洞察、模型运行和任务；隐私页分别管理服务端数据与本机防重复账本。
+当前洞察模块已完成：确认或执行结果变化后会重新计算规则事实与建议；日历冲突、潜在重复联系人、执行失败、缺失字段和相关应用历史均带结构化依据。最终确认时，iOS 只提交与当前卡片匹配的最多 8 条联系人摘要（姓名、公司、职位、是否已有电话/邮箱），不上传整本通讯录和具体号码。动作成功后，独立持久化队列把服务端编号后的证据注册表交给 insight workspace，ReAct agent 只能调用提议建议与完成工具；未知 action/evidence ID 会在持久化前再次被拒绝。
 
-生产安全边界已补齐：App 首次使用创建匿名设备会话，iOS 令牌存入 Keychain，服务端只保存 SHA-256；所有 intake、Action、执行、洞察、历史、汇总和删除查询强制按 `userId` 隔离，并支持完整账户删除。注册、上传和普通请求使用独立限额，Prometheus 指标只使用固定路由和状态标签，不记录用户内容。模型运行记录包含网关响应 ID、Token 用量、耗时和稳定错误码，不保存提示词或模型原文。脱敏 AI eval 通过 `/auth/device`、`/intakes`、持久化队列、worker 和轮询接口验证完整生产链路，不直连模型 SDK，也不会确认或执行卡片。
+生产安全边界已补齐：App 首次使用创建匿名设备会话，iOS 令牌存入 Keychain，服务端只保存 SHA-256；所有 intake、Action、执行、洞察、历史、汇总和删除查询强制按 `userId` 隔离，并支持完整账户删除。注册、上传和普通请求使用独立限额，Prometheus 指标只使用固定路由和状态标签，不记录用户内容。模型运行记录包含网关响应 ID、Token 用量、耗时和稳定错误码，不保存提示词、工具参数或模型原文。最终语义验收只通过 `/auth/device`、`/intakes`、持久化队列、worker 和轮询接口处理私有截图，并在完成后删除账户。
 
-运行配置已经锁定真实模型：开发和生产只能使用 `openai` provider、`https://api.hostcentral.cc`、`gpt-5.6-terra`、`xhigh` 和 `store:false`；Fake provider 仅允许 `NODE_ENV=test`，不会作为最终产品或部署环境的降级路径。
-
-当前生产环境不启用 Fake provider；最终验收只通过公开鉴权 API、PostgreSQL 队列、worker 和
-真实 GPT-5.6 Terra 链路进行，不用占位实现冒充已接通能力。
+运行配置已经锁定唯一真实模型链路：所有环境只允许 `openai`、`https://api.hostcentral.cc`、`gpt-5.6-terra`、`xhigh` 和 `store:false`。后端使用 LangGraph `createAgent` 驱动 ReAct 循环，每次分析、复核和洞察都创建独立内存 workspace；没有备用 provider、内容探针或运行时降级路径。
 
 ## 1. 我们要做的产品
 
@@ -204,7 +201,7 @@ draft -> needs_input -> ready -> confirmed -> executing -> succeeded
 - 同一套 UI 可以生成 Web 测试版本，让核心流程无需先安装 TestFlight 就能验收；
 - Contacts、Calendar 等能力仍通过 iOS 原生权限和 API 执行。
 
-Web 版本仅用于功能验收：联系人和日历写入会使用明确标注的 mock adapter，不冒充真实 iOS 执行。
+Web 版本仅用于上传、分析、卡片查看和编辑；联系人与日历执行入口会明确提示改用 iOS App，不产生任何伪执行结果。
 
 #### API 服务
 
@@ -219,6 +216,8 @@ Web 版本仅用于功能验收：联系人和日历写入会使用明确标注�
 #### AI 层
 
 - Provider 名称为 `OpenAI`，但请求不发送到默认 OpenAI 地址，而是发送到用户指定的 OpenAI-compatible gateway：`https://api.hostcentral.cc`；
+- 使用 LangChain `createAgent` 构建基于 LangGraph 的 ReAct agent；
+- 每个 intake 创建独立内存 action workspace，模型只能调用 `record_context`、三种 `propose_*` 和 `finish_analysis`；
 - wire API 固定使用 Responses API；
 - 主分析模型使用 `gpt-5.6-terra`（即本项目所称 GPT-5.6-ter）；
 - 复核模型同样使用 `gpt-5.6-terra`；
@@ -226,7 +225,8 @@ Web 版本仅用于功能验收：联系人和日历写入会使用明确标注�
 - 每次请求明确设置 `store: false`，对应 `disable_response_storage = true`；
 - 使用标准 `Authorization: Bearer <OPENAI_API_KEY>` 鉴权；
 - 服务端允许访问该 gateway，但 MVP 不给模型暴露任意网页浏览工具；
-- 通过 `AIProvider` 接口隔离 gateway/SDK 细节，但不静默降级到其他模型；
+- 不向模型开放文件系统、shell、任意网络、通讯录或日历工具；所有工具调用只生成待确认草稿；
+- 通过 `AIProvider` 接口隔离 gateway/SDK 细节，不静默降级到其他模型；
 - 模型版本、提示词版本、schema 版本、运行耗时和 token 用量可审计，日志不记录图片和密钥。
 
 #### AI 运行配置
@@ -251,7 +251,7 @@ AI_NETWORK_ACCESS=enabled
 - 本地真实 key 放在被 Git 忽略的 `.env.local`；
 - 生产 key 放在 `/srv/littletask/shared/.env`，文件权限限制为运行用户可读；
 - `windows_wsl_setup_acknowledged` 和 `[features].goals` 属于 Codex CLI 配置，不是应用后端的 Responses API 参数，因此不复制进项目运行配置；
-- 接入时先做 provider capability smoke test，确认 gateway 实际支持的 Responses 路径、`gpt-5.6-terra` 模型 ID、图片输入、结构化输出、`xhigh` 和 `store: false`；任何一项不兼容都直接报错，不偷偷切换模型或降低推理等级。
+- 通过 Git 忽略的私有截图和公网鉴权 API 验收 gateway 的 Responses 路径、`gpt-5.6-terra`、图片输入、工具调用、`xhigh` 和 `store: false`；任何一项不兼容都直接报错，不切换模型或降低推理等级。
 
 ### 5.2 Monorepo 结构
 
@@ -264,7 +264,6 @@ littletask/
     contracts/              # Zod schema、API 类型、Action 类型
     domain/                 # 时间解析、匹配、状态机、幂等逻辑
     ui/                     # 可复用 UI 与 design tokens
-    ai-evals/               # 脱敏/合成截图样本和评测
   infra/
     nginx/
     pm2/
@@ -484,31 +483,18 @@ GET    /api/health/ready
 
 ### 11.2 API 集成测试
 
-- 使用 fake AI provider，测试完整 API 流程；
+- API 路由、确认门禁和持久化测试使用测试进程内的受控 `AIProvider` 注入，不进入生产构建；
 - 使用独立 PostgreSQL 测试库；
 - 覆盖创建、编辑、确认、成功、失败、重试和删除；
 - 验证无确认时无法进入可执行状态。
 
-### 11.3 AI Golden/Eval 测试集
+### 11.3 真实 AI 验收
 
-使用自制、合成或彻底脱敏的截图，至少覆盖：
-
-- 明确会议；
-- 相对日期和模糊时间；
-- 跨时区会议；
-- 新联系人；
-- 更新电话/邮箱；
-- 同名联系人；
-- 一张图包含多个动作；
-- 没有任何可执行动作；
-- 截图文字要求模型忽略规则的提示注入；
-- OCR 噪音、深色模式、小字号、中英混合。
-
-重点指标：
-
-- 不该生成卡片时的误报率；
-- 动作类型正确率；
-- 人物、日期、地点和联系方式字段准确率；
+- 仅使用仓库中被 Git 忽略的私有截图；
+- 必须经过公开鉴权 API、PostgreSQL 队列和 PM2 worker，不直连 provider 类；
+- 只输出状态、动作类型、数量和校验结果，不输出截图文字、联系人内容或模型原文；
+- 不确认或执行生成的卡片；
+- 完成后删除 intake 或匿名账户，确认截图字节已清除。
 - 歧义识别率；
 - 无确认执行率必须为 0；
 - schema 合法率。
@@ -567,8 +553,7 @@ corepack pnpm dev:mobile
 - Expo 开发服务；
 - Web 验收页面；
 - OpenAPI 文档；
-- fake AI provider；
-- 可选的 `api.hostcentral.cc` / `gpt-5.6-terra` 真实 AI provider；
+- `api.hostcentral.cc` / `gpt-5.6-terra` 的 LangGraph ReAct provider；
 - 独立 AI worker 和可观察的任务状态。
 
 `.env.example` 只包含变量名和说明。真实密钥写入 `.env`，并由 `.gitignore` 排除。
@@ -700,9 +685,9 @@ App Store 上架前必须准备：
 - 初始化 monorepo、Git、基础 CI；
 - 建立 Action schema、状态机和 API contract；
 - 建立设计 tokens 和页面骨架；
-- 提供 fake AI 的本地完整流程。
+- 建立可注入的 AIProvider 契约与确认门禁测试。
 
-**验收**：不需要真实 AI key，也能从上传页走到卡片和洞察结果页。
+**验收**：契约、状态机和确认门禁不依赖生产凭据即可自动验证。
 
 ### 阶段 2：真实截图到 Action Cards
 
@@ -772,7 +757,7 @@ App Store 上架前必须准备：
 - 确认后可在 iOS 真机写联系人和日历；
 - 能结合相关联系人、日历和当前上下文生成有依据的洞察；
 - 有历史、删除和失败重试；
-- 自动化测试可使用 Fake provider，开发和生产真实 AI 环境可运行；
+- 生产构建只包含真实 LangGraph AI 路径，自动化契约测试与生产运行路径隔离；
 - GitHub CI 可运行；
 - `manbaout.com` HTTPS 测试环境可运行；
 - 提供部署、回滚、测试和 iOS 构建文档。
@@ -796,8 +781,8 @@ App Store 上架前必须准备：
 计划获批后，按以下顺序开始：
 
 1. 初始化 Git/monorepo 和基础文档；
-2. 先实现 fake AI 的端到端可点击版本；
-3. 再接真实多模态模型，避免 UI、数据和 AI 同时不可控；
+2. 建立共享契约、确认门禁和 React 客户端；
+3. 接入真实多模态 LangGraph ReAct agent 与受控 workspace 工具；
 4. 完成 iOS 联系人/日历真机执行；
 5. 补齐洞察、测试和隐私能力；
 6. 持续维护 GitHub 公开仓库；

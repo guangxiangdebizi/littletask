@@ -29,4 +29,4 @@ Model runs persist provider, model, stage, status, reasoning effort, prompt/sche
 
 ## Production boundary
 
-Production startup fails unless it uses PostgreSQL, loopback binding, trusted Nginx proxying, the fixed HostCentral Responses endpoint, `gpt-5.6-terra`, `xhigh`, and `store:false`. The fake provider is accepted only under `NODE_ENV=test` and is not a runtime fallback.
+Production startup fails unless it uses PostgreSQL, loopback binding, trusted Nginx proxying, the fixed HostCentral Responses endpoint, `gpt-5.6-terra`, `xhigh`, and `store:false`. The LangGraph ReAct provider is the only runtime AI path; no fallback model or provider is available.

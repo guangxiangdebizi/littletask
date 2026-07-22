@@ -67,11 +67,11 @@ const defaultOptions: IntakeServiceOptions = {
   inlineWorker: true,
   maxJobAttempts: 3,
   jobLeaseMs: 5 * 60_000,
-  providerName: 'fake',
-  analysisModel: 'fake-analysis-v1',
-  reviewModel: 'fake-review-v1',
-  reasoningEffort: 'none',
-  promptVersion: '2026-07-22.1',
+  providerName: 'openai-langgraph',
+  analysisModel: 'configured-model',
+  reviewModel: 'configured-review-model',
+  reasoningEffort: 'xhigh',
+  promptVersion: '2026-07-22.2',
   schemaVersion: '1',
 };
 

@@ -21,9 +21,18 @@ export const actionConfirmationRequestSchema = z.object({
   idempotencyKey: z.string().uuid(),
 });
 
+export const authorizedContactContextSchema = z.object({
+  displayName: z.string().min(1).max(160),
+  company: z.string().max(160).nullable(),
+  jobTitle: z.string().max(160).nullable(),
+  hasPhone: z.boolean(),
+  hasEmail: z.boolean(),
+});
+
 export const executionDeviceContextSchema = z.object({
   possibleDuplicateContactCount: z.number().int().min(0).max(8),
   calendarConflictCount: z.number().int().min(0).max(8),
+  relatedContacts: z.array(authorizedContactContextSchema).max(8).optional(),
 });
 
 export const executionResultRequestSchema = z.object({
@@ -44,6 +53,7 @@ export const deviceSessionResponseSchema = z.object({
 export type ApiError = z.infer<typeof apiErrorSchema>;
 export type ActionPatchRequest = z.infer<typeof actionPatchRequestSchema>;
 export type ActionConfirmationRequest = z.infer<typeof actionConfirmationRequestSchema>;
+export type AuthorizedContactContext = z.infer<typeof authorizedContactContextSchema>;
 export type ExecutionResultRequest = z.infer<typeof executionResultRequestSchema>;
 export type ExecutionDeviceContext = z.infer<typeof executionDeviceContextSchema>;
 export type DeviceSessionResponse = z.infer<typeof deviceSessionResponseSchema>;

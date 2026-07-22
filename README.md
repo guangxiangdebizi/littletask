@@ -19,19 +19,19 @@ The project is in active development. The first vertical slice includes:
 - Upload a screenshot and optional note
 - Receive three grounded Action Card types
 - Confirm a stable action revision
-- Simulate execution in the Web acceptance build
+- Execute contact and calendar mutations only in the iOS app
 - Receive grounded follow-up insights
 - Review cursor-paginated history and action provenance
 - Delete one intake or all retained server-side data
 - Isolate anonymous device sessions and delete the complete account
 
-The GPT-5.6 Terra provider is implemented with stateless analysis, review, and evidence-constrained suggestion requests. PostgreSQL persists the complete intake/action audit trail and feeds a restart-safe standalone AI worker. Anonymous device sessions isolate every user-owned query while storing only bearer-token hashes. The API adds separate registration/upload/request limits and bounded-label Prometheus metrics. The iOS client includes editable revision-bound cards, local contact matching, calendar conflict checks, native Contacts/Calendar adapters, a SQLite execution ledger, asynchronous model-suggestion polling, history provenance, and privacy controls. Its iOS JavaScript bundle passes locally; an EAS build and physical-device acceptance remain before TestFlight. A rotated runtime credential is still required for the live gateway compatibility check. The full product and delivery plan is documented in [plan.md](./plan.md).
+GPT-5.6 Terra runs inside a LangGraph ReAct workflow. Each intake gets an isolated in-memory action workspace whose tools can only record validated drafts; the model cannot mutate contacts or calendars. PostgreSQL persists the complete intake/action audit trail and feeds a restart-safe standalone AI worker. Anonymous device sessions isolate every user-owned query while storing only bearer-token hashes. The iOS client includes editable revision-bound cards, local contact matching, calendar conflict checks, native Contacts/Calendar adapters, a SQLite execution ledger, evidence-grounded suggestions, history provenance, and privacy controls. Its iOS JavaScript bundle passes locally; an EAS build and physical-device acceptance remain before TestFlight. The full product and delivery plan is documented in [plan.md](./plan.md).
 
 ## Stack
 
 - Expo / React Native / TypeScript for the iOS app and web acceptance build
 - Fastify / PostgreSQL / Prisma for the backend
-- OpenAI-compatible Responses API for multimodal analysis and review
+- LangGraph ReAct agents over the OpenAI-compatible Responses API
 - PM2 / Nginx / Let's Encrypt for deployment
 
 ## Repository layout
@@ -104,10 +104,6 @@ The API publishes its OpenAPI 3.1 contract at `/api/openapi.json`; component sch
 from the same Zod contracts consumed by the app. The public privacy policy is available in the app
 and at `/privacy-policy` in the Web export.
 
-The real-provider eval harness renders synthetic chat screenshots in memory, exercises the complete
-authenticated upload/worker/poll flow, and deletes its anonymous account afterward. See
-[docs/ai-evals.md](./docs/ai-evals.md).
-
 Production uses an isolated Node 22 runtime, PostgreSQL container, low-privilege PM2 children,
 atomic Git-SHA releases, Nginx/SSL, daily database dumps, and validated rollback while preserving
 the existing Roundcube service at `/webmail/`. See [docs/deployment.md](./docs/deployment.md).
@@ -120,13 +116,13 @@ corepack pnpm check
 
 ## AI configuration
 
-Development and production are locked to `AI_PROVIDER=openai`; the fake provider is accepted only under `NODE_ENV=test`. Inject `OPENAI_API_KEY` at runtime. The provider sends the screenshot twice through the OpenAI-compatible Responses API: first for extraction, then for an independent evidence review, and later uses the same provider for evidence-constrained suggestions. It uses `gpt-5.6-terra`, `xhigh` reasoning, Structured Outputs, original-detail vision input, and `store: false` on every request.
+All environments use the same LangGraph/OpenAI runtime path. Inject `OPENAI_API_KEY` at runtime. The agent receives the screenshot and optional text as one multimodal message, uses Zod-validated workspace tools to build Action Cards, performs an independent review run, and later uses a separate evidence-constrained workspace for suggestions. It uses `gpt-5.6-terra`, `xhigh` reasoning, Responses API vision input, and `store: false` on every model turn.
 
 HEIC screenshots are converted to high-quality JPEG in memory before inference. In PostgreSQL mode, original screenshot bytes are retained only in the pending job and cleared after success or permanent failure; history retains only image metadata and a SHA-256 hash. See [docs/ai-provider.md](./docs/ai-provider.md) for the request contract and gateway smoke-test checklist.
 
 ## Security
 
-Do not commit API keys, real contact data, or private chat screenshots. Use synthetic or fully anonymized fixtures for tests and examples.
+Do not commit API keys, real contact data, or private chat screenshots. Semantic acceptance files must remain Git-ignored and be deleted from the server after the run.
 
 ## License
 

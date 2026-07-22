@@ -20,8 +20,6 @@
     "lint": "eslint apps/api/src packages/contracts/src packages/domain/src && corepack pnpm --filter @littletask/mobile lint",
     "test": "corepack pnpm -r --if-present test",
     "test:integration": "corepack pnpm --filter @littletask/api test:integration",
-    "eval:ai": "corepack pnpm --filter @littletask/ai-evals eval",
-    "probe:ai": "corepack pnpm --filter @littletask/api probe:ai",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "corepack pnpm format:check && corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm build"

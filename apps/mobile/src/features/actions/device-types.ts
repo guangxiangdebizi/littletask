@@ -1,4 +1,4 @@
-import type { ActionCard } from '@littletask/contracts';
+import type { ActionCard, AuthorizedContactContext } from '@littletask/contracts';
 
 export interface DeviceContactCandidate {
   id: string;
@@ -12,7 +12,6 @@ export interface DeviceContactCandidate {
   addresses: string[];
   notes: string | null;
   score: number;
-  simulated: boolean;
 }
 
 export interface DeviceCalendarConflict {
@@ -24,15 +23,16 @@ export interface DeviceCalendarConflict {
 }
 
 export interface ActionPreparation {
-  mode: 'native' | 'simulated';
+  mode: 'native';
   contacts: DeviceContactCandidate[];
+  relatedContacts: AuthorizedContactContext[];
   calendarConflicts: DeviceCalendarConflict[];
   calendarId: string | null;
 }
 
 export interface DeviceMutationResult {
   nativeRecordRef: string;
-  mode: ActionPreparation['mode'];
+  mode: 'native';
 }
 
 export class DeviceActionError extends Error {

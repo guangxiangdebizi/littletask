@@ -8,7 +8,7 @@ LittleTask executes contact and calendar mutations on the user's device. The API
 - `create_contact`: ranks possible duplicates locally, then creates one contact.
 - `update_contact`: requires the user to select a concrete local contact and displays the field-level diff before updating it.
 
-The Web acceptance build uses an adapter marked `simulated`. It follows the same confirmation and reporting protocol but never requests native permissions or changes system data.
+The Web build can upload screenshots and review or edit Action Cards. Native preparation and execution are unavailable there; the adapter rejects any attempted contact or calendar mutation and never reports a fabricated result.
 
 ## Confirmation sequence
 
@@ -28,7 +28,7 @@ Contact matching normalizes names, Chinese phone prefixes, and email casing. Pho
 
 Calendar conflicts are events that overlap the proposed start/end interval. The client reads the selected interval across visible calendars, shows at most eight conflicts, and requires a separate acknowledgement before creation. Existing events are never changed.
 
-After final confirmation, the API receives only two bounded counts: possible duplicate contacts and overlapping calendar items (both capped at eight). Candidate names, phone numbers, email addresses, event titles, calendar names, and event times remain on the device and are never included in this context report. The counts are stored with the execution result solely to ground later observations.
+After final confirmation, the API receives two bounded counts plus at most eight contact summaries related to the current card. Each summary contains display name, company, job title, and booleans indicating whether a phone or email exists. Actual phone numbers, email addresses, the full candidate list, event titles, calendar names, and event times remain on the device. The bounded context is stored with the execution result solely to ground later observations and suggestions.
 
 Attendee names are appended to event notes for reference. The MVP does not send calendar invitations.
 
@@ -47,7 +47,7 @@ prepared -> confirmed -> executing -> succeeded
 - The user must check Contacts or Calendar and then either mark the existing record as found or explicitly authorize a new attempt.
 - If the device write succeeded but API reporting failed, reopening the action replays only the report and does not repeat the native write.
 
-The Web implementation uses versioned `localStorage` only for acceptance testing. It is not presented as the iOS durability guarantee.
+The Web build does not enter the native execution sequence. Its local storage is not presented as an iOS durability guarantee.
 
 ## iOS constraints
 

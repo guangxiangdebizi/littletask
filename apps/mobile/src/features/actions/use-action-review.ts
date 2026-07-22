@@ -71,11 +71,7 @@ export function useActionReview(intakeId?: string, actionId?: string) {
     mutationFn: deviceActionAdapter.prepare,
     onSuccess: (value, source) => {
       setPrepared({ revision: source.revision, value });
-      setNotice(
-        value.mode === 'simulated'
-          ? 'Web 只会模拟执行，不会访问或修改系统联系人与日历。'
-          : '设备核对完成。请检查下方完整内容后再最终确认。',
-      );
+      setNotice('设备核对完成。请检查下方完整内容后再最终确认。');
     },
   });
   const pickerMutation = useMutation({
@@ -102,11 +98,7 @@ export function useActionReview(intakeId?: string, actionId?: string) {
     }) => actionExecutionCoordinator.execute(source, preparation),
     onSuccess: (updated) => {
       cacheAction(updated);
-      setNotice(
-        Platform.OS === 'web'
-          ? 'Web 模拟执行已完成，没有写入系统数据。'
-          : '设备写入已完成并安全回报。',
-      );
+      setNotice('设备写入已完成并安全回报。');
     },
     onSettled: () =>
       queryClient.invalidateQueries({
@@ -208,7 +200,11 @@ export function useActionReview(intakeId?: string, actionId?: string) {
     localOutcomeUnknown,
     permissionError: currentError instanceof DeviceActionError ? currentError : null,
     editable: action ? ['ready', 'needs_input'].includes(action.status) : false,
-    canPrepare: action ? ['ready', 'confirmed', 'failed'].includes(action.status) : false,
+    executionAvailable: Platform.OS !== 'web',
+    canPrepare:
+      Platform.OS !== 'web' && action
+        ? ['ready', 'confirmed', 'failed'].includes(action.status)
+        : false,
     needsCandidate: action?.type === 'update_contact' && !action.payload.target.localContactId,
     duplicateWarning:
       action?.type === 'create_contact' && (activePreparation?.contacts.length ?? 0) > 0,

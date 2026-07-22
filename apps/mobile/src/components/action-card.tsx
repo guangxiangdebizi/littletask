@@ -11,7 +11,7 @@ import { StatusPill } from './status-pill';
 interface ActionCardProps {
   action: ActionCardModel;
   onOpen: (action: ActionCardModel) => void;
-  simulatedExecution: boolean;
+  nativeExecutionAvailable: boolean;
 }
 
 function formatDateTime(value: string, timezone: string): string {
@@ -129,7 +129,7 @@ export function ActionFields({
   );
 }
 
-export function ActionCard({ action, onOpen, simulatedExecution }: ActionCardProps) {
+export function ActionCard({ action, onOpen, nativeExecutionAvailable }: ActionCardProps) {
   const visual = actionVisuals[action.type];
   const canOpen = ['ready', 'needs_input', 'confirmed', 'failed', 'succeeded'].includes(
     action.status,
@@ -141,9 +141,9 @@ export function ActionCard({ action, onOpen, simulatedExecution }: ActionCardPro
         ? '查看已执行内容'
         : action.status === 'failed'
           ? '查看并重试'
-          : simulatedExecution
-            ? '核对并模拟执行'
-            : '核对并执行';
+          : nativeExecutionAvailable
+            ? '核对并执行'
+            : '查看卡片';
 
   return (
     <View style={[styles.card, { borderTopColor: visual.accent }]}>

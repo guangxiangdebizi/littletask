@@ -20,6 +20,7 @@ export function ActionExecutionFlow({ controller }: { controller: ActionReviewCo
     uncertainError,
     reportPendingError,
     permissionError,
+    executionAvailable,
     canPrepare,
     needsCandidate,
     duplicateWarning,
@@ -55,6 +56,13 @@ export function ActionExecutionFlow({ controller }: { controller: ActionReviewCo
             <Text style={styles.successTitle}>这个版本已经执行完成</Text>
             <Text style={styles.successBody}>设备记录不会因再次打开本页面而重复创建。</Text>
           </View>
+        </View>
+      ) : !executionAvailable ? (
+        <View style={styles.preparePanel}>
+          <Text style={styles.prepareTitle}>请在 iOS App 中执行</Text>
+          <Text style={styles.prepareBody}>
+            Web 端不访问联系人或日历，也不会回报任何虚构的执行结果。
+          </Text>
         </View>
       ) : canPrepare && !activePreparation && !reportPending ? (
         <View style={styles.preparePanel}>
@@ -150,7 +158,6 @@ export function ActionExecutionFlow({ controller }: { controller: ActionReviewCo
           onConflictAccepted={controller.setConflictAccepted}
           onDuplicateAccepted={controller.setDuplicateAccepted}
           onExecute={controller.execute}
-          simulated={activePreparation.mode === 'simulated'}
         />
       ) : null}
     </>

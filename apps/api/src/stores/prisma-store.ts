@@ -863,6 +863,7 @@ export class PrismaIntakeStore implements IntakeStore {
         row.deviceContext ?? {
           possibleDuplicateContactCount: 0,
           calendarConflictCount: 0,
+          relatedContacts: [],
         },
       ),
       errorCode:

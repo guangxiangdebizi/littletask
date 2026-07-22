@@ -101,6 +101,28 @@ function eventTime(action: Extract<ActionCard, { type: 'create_event' }>): strin
   }).format(new Date(action.payload.startAt));
 }
 
+function relatedContactEvidence(
+  intake: Intake,
+  action: ActionCard,
+  execution: ExecutionObservation | undefined,
+): InsightEvidence[] {
+  return (execution?.deviceContext.relatedContacts ?? []).slice(0, 8).map((contact) => ({
+    source: 'contact_check',
+    label: '已授权联系人上下文',
+    detail: [
+      contact.displayName,
+      contact.company,
+      contact.jobTitle,
+      contact.hasPhone ? '已有电话' : null,
+      contact.hasEmail ? '已有邮箱' : null,
+    ]
+      .filter(Boolean)
+      .join(' · '),
+    intakeId: intake.id,
+    actionId: action.id,
+  }));
+}
+
 export function deriveInsights(input: InsightDerivationInput, runtime: Runtime): Insight[] {
   const { intake } = input;
   const createdAt = runtime.now().toISOString();
@@ -127,7 +149,20 @@ export function deriveInsights(input: InsightDerivationInput, runtime: Runtime):
     ['confirmed', 'failed', 'succeeded'].includes(item.status),
   )) {
     const execution = latestExecution.get(action.id);
+    const contactEvidence = relatedContactEvidence(intake, action, execution);
     const missing = missingFields(action);
+
+    if (action.status === 'succeeded' && contactEvidence.length > 0) {
+      add({
+        actionId: action.id,
+        type: 'follow_up',
+        kind: 'observation',
+        priority: 'low',
+        title: '已找到与本次动作相关的联系人上下文',
+        body: `设备本地核对提供了 ${contactEvidence.length} 条相关联系人摘要，后续建议会结合这些已授权信息。`,
+        evidence: contactEvidence,
+      });
+    }
 
     if (missing.length > 0) {
       add({
@@ -222,6 +257,7 @@ export function deriveInsights(input: InsightDerivationInput, runtime: Runtime):
         evidence: [
           actionEvidence(intake, action, `${eventTime(action)} · ${action.payload.title}`),
           ...sourceEvidence(intake, action),
+          ...contactEvidence,
         ],
       });
       add({
@@ -253,6 +289,7 @@ export function deriveInsights(input: InsightDerivationInput, runtime: Runtime):
         evidence: [
           actionEvidence(intake, action, `已执行：${action.type}`),
           ...sourceEvidence(intake, action),
+          ...contactEvidence,
         ],
       });
     }

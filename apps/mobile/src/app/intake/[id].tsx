@@ -115,7 +115,7 @@ export default function IntakeResultScreen() {
         <Feather color={colors.blue} name="tool" size={16} />
         <Text style={styles.modeNoticeText}>
           {Platform.OS === 'web'
-            ? 'Web 验收版只会明确模拟执行，不会访问或修改系统联系人与日历。'
+            ? 'Web 可上传截图并核对卡片；联系人和日历写入只在 iOS App 中开放。'
             : 'iOS 仅在你主动点击设备核对后请求对应权限；只有最终确认才会写入设备。'}
         </Text>
       </View>
@@ -150,7 +150,7 @@ export default function IntakeResultScreen() {
                   params: { id: selected.id, intakeId },
                 })
               }
-              simulatedExecution={Platform.OS === 'web'}
+              nativeExecutionAvailable={Platform.OS !== 'web'}
             />
           ))
         ) : (

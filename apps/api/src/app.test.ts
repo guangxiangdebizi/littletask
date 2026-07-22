@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { buildApp } from './app';
 import { loadConfig } from './config';
 import { InMemoryIntakeStore } from './stores/in-memory-store';
+import { createScenarioProvider, testConfigEnvironment } from './test-support';
 
 async function authenticatedInject(app: FastifyInstance) {
   const session = (
@@ -54,8 +55,9 @@ function multipartScreenshot(): { payload: Buffer; contentType: string } {
 describe('LittleTask API', () => {
   it('serves an OpenAPI contract with the confirmation boundary', async () => {
     const app = await buildApp({
-      config: loadConfig({ NODE_ENV: 'test', AI_PROVIDER: 'fake', LOG_LEVEL: 'silent' }),
+      config: loadConfig(testConfigEnvironment()),
       logger: false,
+      provider: createScenarioProvider(),
     });
 
     const response = await app.inject({ method: 'GET', url: '/api/openapi.json' });
@@ -76,14 +78,15 @@ describe('LittleTask API', () => {
   it('reports readiness only while the persistence dependency is reachable', async () => {
     const store = new InMemoryIntakeStore();
     const app = await buildApp({
-      config: loadConfig({ NODE_ENV: 'test', AI_PROVIDER: 'fake', LOG_LEVEL: 'silent' }),
+      config: loadConfig(testConfigEnvironment()),
       logger: false,
+      provider: createScenarioProvider(),
       store,
     });
 
     const ready = await app.inject({ method: 'GET', url: '/api/health/ready' });
     expect(ready.statusCode).toBe(200);
-    expect(ready.json()).toEqual({ status: 'ready', provider: 'fake' });
+    expect(ready.json()).toEqual({ status: 'ready', provider: 'openai' });
 
     vi.spyOn(store, 'healthCheck').mockRejectedValueOnce(new Error('database unavailable'));
     const unavailable = await app.inject({ method: 'GET', url: '/api/health/ready' });
@@ -95,8 +98,9 @@ describe('LittleTask API', () => {
 
   it('requires a device session and isolates every user-owned resource', async () => {
     const app = await buildApp({
-      config: loadConfig({ NODE_ENV: 'test', AI_PROVIDER: 'fake', LOG_LEVEL: 'silent' }),
+      config: loadConfig(testConfigEnvironment()),
       logger: false,
+      provider: createScenarioProvider(),
       inlineWorker: false,
     });
     const unauthorized = await app.inject({ method: 'GET', url: '/api/v1/history' });
@@ -180,10 +184,11 @@ describe('LittleTask API', () => {
     await app.close();
   });
 
-  it('runs the fake screenshot-to-action flow with an explicit confirmation gate', async () => {
+  it('runs the screenshot-to-action flow with an explicit confirmation gate', async () => {
     const app = await buildApp({
-      config: loadConfig({ NODE_ENV: 'test', AI_PROVIDER: 'fake', LOG_LEVEL: 'silent' }),
+      config: loadConfig(testConfigEnvironment()),
       logger: false,
+      provider: createScenarioProvider(),
     });
     const inject = await authenticatedInject(app);
     const upload = multipartScreenshot();
@@ -457,8 +462,9 @@ describe('LittleTask API', () => {
 
   it('paginates history with an opaque cursor and can clear all server data', async () => {
     const app = await buildApp({
-      config: loadConfig({ NODE_ENV: 'test', AI_PROVIDER: 'fake', LOG_LEVEL: 'silent' }),
+      config: loadConfig(testConfigEnvironment()),
       logger: false,
+      provider: createScenarioProvider(),
       inlineWorker: false,
     });
     const inject = await authenticatedInject(app);

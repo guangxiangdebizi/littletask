@@ -48,7 +48,7 @@ Do not invent or commit an `ascAppId` before that application exists.
 
 ## Release gates
 
-Use a disposable contact, a dedicated test calendar, and a synthetic screenshot. Verify:
+Use a disposable contact, a dedicated test calendar, and a private screenshot excluded from Git. Verify:
 
 1. Photo access is requested only after the user opens the picker.
 2. Contact and calendar access are requested only during explicit device verification.

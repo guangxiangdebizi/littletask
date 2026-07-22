@@ -1,4 +1,9 @@
-import type { ActionCard, ContactPayload, UpdateContactPayload } from '@littletask/contracts';
+import type {
+  ActionCard,
+  AuthorizedContactContext,
+  ContactPayload,
+  UpdateContactPayload,
+} from '@littletask/contracts';
 import type {
   ContactPatch,
   ExistingAddress,
@@ -12,6 +17,61 @@ import { rankContactCandidates, normalizePhone } from './contact-matching';
 import { DeviceActionError, type DeviceContactCandidate } from './device-types';
 
 type ContactAction = Extract<ActionCard, { type: 'create_contact' | 'update_contact' }>;
+
+export function contactContextFromCandidates(
+  candidates: DeviceContactCandidate[],
+): AuthorizedContactContext[] {
+  return candidates.slice(0, 8).map((candidate) => ({
+    displayName: candidate.displayName,
+    company: candidate.company,
+    jobTitle: candidate.jobTitle,
+    hasPhone: candidate.phones.length > 0,
+    hasEmail: candidate.emails.length > 0,
+  }));
+}
+
+export async function readNativeRelatedContacts(
+  action: Extract<ActionCard, { type: 'create_event' }>,
+): Promise<AuthorizedContactContext[]> {
+  const Contacts = await import('expo-contacts');
+  const permission = await Contacts.getPermissionsAsync();
+  if (permission.status !== 'granted') return [];
+
+  const names = [
+    ...new Set(action.payload.attendees.map((attendee) => attendee.displayName.trim())),
+  ].filter(Boolean);
+  if (names.length === 0) return [];
+  const fields = [
+    Contacts.ContactField.FULL_NAME,
+    Contacts.ContactField.GIVEN_NAME,
+    Contacts.ContactField.FAMILY_NAME,
+    Contacts.ContactField.PHONES,
+    Contacts.ContactField.EMAILS,
+    Contacts.ContactField.COMPANY,
+    Contacts.ContactField.JOB_TITLE,
+  ] as const;
+  const rows = (
+    await Promise.all(
+      names.slice(0, 8).map((name) => Contacts.Contact.getAllDetails(fields, { name, limit: 3 })),
+    )
+  ).flat();
+  const seen = new Set<string>();
+  const result: AuthorizedContactContext[] = [];
+  for (const row of rows) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    result.push({
+      displayName:
+        row.fullName || [row.familyName, row.givenName].filter(Boolean).join('') || '未命名联系人',
+      company: row.company,
+      jobTitle: row.jobTitle ?? null,
+      hasPhone: row.phones.some((phone) => Boolean(phone.number)),
+      hasEmail: row.emails.some((email) => Boolean(email.address)),
+    });
+    if (result.length === 8) break;
+  }
+  return result;
+}
 
 function formatAddress(address: ExistingAddress | NewAddress): string {
   return [address.street, address.city, address.state, address.postcode, address.country]
@@ -102,7 +162,6 @@ export async function prepareNativeContactAction(
     jobTitle: row.jobTitle ?? null,
     addresses: row.addresses.map(formatAddress).filter(Boolean),
     notes: null,
-    simulated: false,
   }));
   return rankContactCandidates(matchInput(action), candidates);
 }
@@ -134,7 +193,6 @@ export async function pickNativeContactCandidate(): Promise<DeviceContactCandida
     addresses: addresses.map(formatAddress).filter(Boolean),
     notes: null,
     score: 1_000,
-    simulated: false,
   };
 }
 

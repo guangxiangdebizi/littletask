@@ -4,7 +4,7 @@ import { z } from 'zod';
 const confidenceSchema = z.enum(['high', 'medium', 'low']);
 const evidenceSourceSchema = z.enum(['screenshot', 'note', 'contact', 'calendar', 'history']);
 
-const modelEvidenceSchema = z.object({
+export const modelEvidenceSchema = z.object({
   source: evidenceSourceSchema,
   quote: z.string().min(1).max(240),
   author: z.string().min(1).max(80).nullable(),
@@ -15,7 +15,7 @@ const modelAttendeeSchema = z.object({
   localContactId: z.string().min(1).max(200).nullable(),
 });
 
-const modelMeetingPayloadSchema = z.object({
+export const modelMeetingPayloadSchema = z.object({
   title: z.string().min(1).max(160),
   attendees: z.array(modelAttendeeSchema).max(30),
   startAt: z.string().datetime({ offset: true }),
@@ -26,7 +26,7 @@ const modelMeetingPayloadSchema = z.object({
   suggestedDurationMinutes: z.number().int().min(5).max(1_440).nullable(),
 });
 
-const modelContactPayloadSchema = z.object({
+export const modelContactPayloadSchema = z.object({
   givenName: z.string().max(80),
   familyName: z.string().max(80),
   displayName: z.string().min(1).max(160),
@@ -50,7 +50,7 @@ const contactFieldSchema = z.enum([
   'notes',
 ]);
 
-const modelUpdateContactPayloadSchema = z.object({
+export const modelUpdateContactPayloadSchema = z.object({
   target: z.object({
     displayName: z.string().min(1).max(160),
     localContactId: z.string().min(1).max(200).nullable(),
@@ -74,29 +74,28 @@ const proposalBaseShape = {
   assumptions: z.array(z.string().min(1).max(240)).max(12),
 };
 
+export const modelMeetingProposalInputSchema = z.object({
+  ...proposalBaseShape,
+  payload: modelMeetingPayloadSchema,
+});
+
+export const modelContactProposalInputSchema = z.object({
+  ...proposalBaseShape,
+  payload: modelContactPayloadSchema,
+});
+
+export const modelUpdateContactProposalInputSchema = z.object({
+  ...proposalBaseShape,
+  payload: modelUpdateContactPayloadSchema,
+});
+
 const modelActionProposalSchema = z.discriminatedUnion('type', [
-  z.object({
-    ...proposalBaseShape,
-    type: z.literal('create_event'),
-    payload: modelMeetingPayloadSchema,
-  }),
-  z.object({
-    ...proposalBaseShape,
-    type: z.literal('create_contact'),
-    payload: modelContactPayloadSchema,
-  }),
-  z.object({
-    ...proposalBaseShape,
-    type: z.literal('update_contact'),
-    payload: modelUpdateContactPayloadSchema,
-  }),
+  modelMeetingProposalInputSchema.extend({ type: z.literal('create_event') }),
+  modelContactProposalInputSchema.extend({ type: z.literal('create_contact') }),
+  modelUpdateContactProposalInputSchema.extend({ type: z.literal('update_contact') }),
 ]);
 
-/**
- * Structured Outputs requires every field to be present. Nullable fields are
- * converted back to optional domain fields after the SDK parses the response.
- */
-export const modelAnalysisDraftSchema = z.object({
+export const modelAnalysisContextSchema = z.object({
   summary: z.string().min(1).max(1_000),
   participants: z.array(z.string().min(1).max(120)).max(30),
   facts: z.array(z.string().min(1).max(300)).max(50),
@@ -110,27 +109,33 @@ export const modelAnalysisDraftSchema = z.object({
       }),
     )
     .max(30),
+});
+
+/**
+ * Tool schemas require every model-authored field to be present. Nullable fields
+ * are converted back to optional domain fields before domain persistence.
+ */
+export const modelAnalysisDraftSchema = z.object({
+  ...modelAnalysisContextSchema.shape,
   actions: z.array(modelActionProposalSchema).max(20),
 });
 
 export type ModelAnalysisDraft = z.infer<typeof modelAnalysisDraftSchema>;
 
+export const modelGroundedSuggestionSchema = z.object({
+  actionId: z.string().uuid().nullable(),
+  type: z.enum(['meeting_preparation', 'follow_up', 'reply_suggestion']),
+  priority: z.enum(['medium', 'low']),
+  title: z.string().min(1).max(160),
+  body: z.string().min(1).max(1_000),
+  evidenceIds: z
+    .array(z.string().regex(/^E[1-9][0-9]*$/))
+    .min(1)
+    .max(5),
+});
+
 export const modelGroundedSuggestionsSchema = z.object({
-  suggestions: z
-    .array(
-      z.object({
-        actionId: z.string().uuid().nullable(),
-        type: z.enum(['meeting_preparation', 'follow_up', 'reply_suggestion']),
-        priority: z.enum(['medium', 'low']),
-        title: z.string().min(1).max(160),
-        body: z.string().min(1).max(1_000),
-        evidenceIds: z
-          .array(z.string().regex(/^E[1-9][0-9]*$/))
-          .min(1)
-          .max(5),
-      }),
-    )
-    .max(4),
+  suggestions: z.array(modelGroundedSuggestionSchema).max(4),
 });
 
 export type ModelGroundedSuggestions = z.infer<typeof modelGroundedSuggestionsSchema>;

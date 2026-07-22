@@ -6,41 +6,31 @@ import type {
   DeviceActionAdapter,
   DeviceContactCandidate,
 } from './device-types';
-
-function simulatedCandidate(action: Extract<ActionCard, { type: 'update_contact' }>) {
-  const value = (field: string) =>
-    action.payload.changes.find((change) => change.field === field)?.previousValue ?? null;
-  return {
-    id: action.payload.target.localContactId ?? `web-demo:${action.id}`,
-    displayName: action.payload.target.displayName,
-    givenName: value('givenName'),
-    familyName: value('familyName'),
-    phones: value('phone') ? [value('phone') as string] : ['138 0013 8000'],
-    emails: value('email') ? [value('email') as string] : [],
-    company: value('company'),
-    jobTitle: value('jobTitle'),
-    addresses: value('address') ? [value('address') as string] : [],
-    notes: value('notes'),
-    score: 100,
-    simulated: true,
-  } satisfies DeviceContactCandidate;
-}
+import { DeviceActionError } from './device-types';
 
 async function prepareNative(action: ActionCard): Promise<ActionPreparation> {
   if (action.type === 'create_event') {
     const { prepareNativeCalendarAction } = await import('./native-calendar');
-    const result = await prepareNativeCalendarAction(action);
+    const { readNativeRelatedContacts } = await import('./native-contacts');
+    const [result, relatedContacts] = await Promise.all([
+      prepareNativeCalendarAction(action),
+      readNativeRelatedContacts(action),
+    ]);
     return {
       mode: 'native',
       contacts: [],
+      relatedContacts,
       calendarConflicts: result.conflicts,
       calendarId: result.calendarId,
     };
   }
-  const { prepareNativeContactAction } = await import('./native-contacts');
+  const { contactContextFromCandidates, prepareNativeContactAction } =
+    await import('./native-contacts');
+  const contacts = await prepareNativeContactAction(action);
   return {
     mode: 'native',
-    contacts: await prepareNativeContactAction(action),
+    contacts,
+    relatedContacts: contactContextFromCandidates(contacts),
     calendarConflicts: [],
     calendarId: null,
   };
@@ -49,21 +39,18 @@ async function prepareNative(action: ActionCard): Promise<ActionPreparation> {
 export const deviceActionAdapter: DeviceActionAdapter = {
   async prepare(action) {
     if (Platform.OS !== 'web') return prepareNative(action);
-    return {
-      mode: 'simulated',
-      contacts: action.type === 'update_contact' ? [simulatedCandidate(action)] : [],
-      calendarConflicts: [],
-      calendarId: null,
-    };
+    throw new DeviceActionError(
+      'NATIVE_ACTION_UNAVAILABLE',
+      '联系人和日历操作只能在 iOS App 中核对并执行。',
+    );
   },
 
   async execute(action, preparation) {
     if (Platform.OS === 'web') {
-      await new Promise((resolve) => setTimeout(resolve, 350));
-      return {
-        mode: 'simulated',
-        nativeRecordRef: `mock:web:${action.type}:${action.id}:r${action.revision}`,
-      };
+      throw new DeviceActionError(
+        'NATIVE_ACTION_UNAVAILABLE',
+        '联系人和日历操作只能在 iOS App 中执行。',
+      );
     }
 
     if (action.type === 'create_event') {

@@ -12,6 +12,7 @@ import { buildApp } from './app';
 import { loadConfig } from './config';
 import { createIntakeService } from './runtime';
 import { createPrismaClient, PrismaIntakeStore } from './stores/prisma-store';
+import { createScenarioProvider, testConfigEnvironment } from './test-support';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
@@ -59,16 +60,15 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
   if (!databaseUrl) return;
 
   const prisma = createPrismaClient(databaseUrl);
-  const config = loadConfig({
-    NODE_ENV: 'test',
-    LOG_LEVEL: 'silent',
-    AI_PROVIDER: 'fake',
-    PERSISTENCE_PROVIDER: 'postgres',
-    DATABASE_URL: databaseUrl,
-    JOB_MAX_ATTEMPTS: '3',
-    JOB_LEASE_MS: '1000',
-    JOB_POLL_MS: '100',
-  });
+  const config = loadConfig(
+    testConfigEnvironment({
+      PERSISTENCE_PROVIDER: 'postgres',
+      DATABASE_URL: databaseUrl,
+      JOB_MAX_ATTEMPTS: '3',
+      JOB_LEASE_MS: '1000',
+      JOB_POLL_MS: '100',
+    }),
+  );
 
   beforeAll(async () => {
     await prisma.$executeRawUnsafe('TRUNCATE TABLE "users" RESTART IDENTITY CASCADE');
@@ -79,7 +79,12 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
   });
 
   it('survives API/worker restarts and deduplicates confirmations and executions', async () => {
-    const apiBeforeRestart = await buildApp({ config, logger: false, inlineWorker: false });
+    const apiBeforeRestart = await buildApp({
+      config,
+      logger: false,
+      provider: createScenarioProvider(),
+      inlineWorker: false,
+    });
     const firstSession = await createAuthenticatedInject(apiBeforeRestart);
     const upload = multipartScreenshot();
     const created = await firstSession.inject({
@@ -95,11 +100,20 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
     expect(await prisma.analysisJob.count({ where: { intakeId: id, status: 'queued' } })).toBe(1);
 
     const workerStore = new PrismaIntakeStore(createPrismaClient(databaseUrl));
-    const worker = createIntakeService(config, { store: workerStore, inlineWorker: false });
+    const worker = createIntakeService(config, {
+      provider: createScenarioProvider(),
+      store: workerStore,
+      inlineWorker: false,
+    });
     expect(await worker.service.processNextJob('integration-worker')).toBe(true);
     await workerStore.close();
 
-    const apiAfterRestart = await buildApp({ config, logger: false, inlineWorker: false });
+    const apiAfterRestart = await buildApp({
+      config,
+      logger: false,
+      provider: createScenarioProvider(),
+      inlineWorker: false,
+    });
     const secondSession = await createAuthenticatedInject(apiAfterRestart, firstSession.token);
     const analyzed = await secondSession.inject({
       method: 'GET',
@@ -191,6 +205,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
 
     const suggestionWorkerStore = new PrismaIntakeStore(createPrismaClient(databaseUrl));
     const suggestionWorker = createIntakeService(config, {
+      provider: createScenarioProvider(),
       store: suggestionWorkerStore,
       inlineWorker: false,
     });
@@ -235,7 +250,12 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
       { status: 'succeeded', generation: 2 },
     );
 
-    const apiSecondRestart = await buildApp({ config, logger: false, inlineWorker: false });
+    const apiSecondRestart = await buildApp({
+      config,
+      logger: false,
+      provider: createScenarioProvider(),
+      inlineWorker: false,
+    });
     const thirdSession = await createAuthenticatedInject(apiSecondRestart, firstSession.token);
     const history = await thirdSession.inject({ method: 'GET', url: '/api/v1/history' });
     expect(history.statusCode).toBe(200);
@@ -296,7 +316,12 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
   });
 
   it('reclaims a job abandoned by a crashed worker lease', async () => {
-    const api = await buildApp({ config, logger: false, inlineWorker: false });
+    const api = await buildApp({
+      config,
+      logger: false,
+      provider: createScenarioProvider(),
+      inlineWorker: false,
+    });
     const session = await createAuthenticatedInject(api);
     const upload = multipartScreenshot('后天下午再见。');
     const created = await session.inject({
@@ -314,7 +339,11 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
     await crashedStore.close();
 
     const recoveryStore = new PrismaIntakeStore(createPrismaClient(databaseUrl));
-    const recovery = createIntakeService(config, { store: recoveryStore, inlineWorker: false });
+    const recovery = createIntakeService(config, {
+      provider: createScenarioProvider(),
+      store: recoveryStore,
+      inlineWorker: false,
+    });
     expect(await recovery.service.processNextJob('replacement-worker', 0)).toBe(true);
     const user = await prisma.intake.findUniqueOrThrow({
       where: { id },

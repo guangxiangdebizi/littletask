@@ -151,8 +151,8 @@ export default function PrivacyScreen() {
           <Feather color={colors.blue} name="shield" size={18} />
           <Text style={styles.sectionTitle}>数据边界</Text>
         </View>
-        <PolicyRow text="联系人候选和日历冲突的名称、号码及详情只留在设备。" />
-        <PolicyRow text="后端只接收两个不超过 8 的计数，用于生成有依据的提醒。" />
+        <PolicyRow text="具体电话号码、邮箱、完整候选列表和日历冲突详情只留在设备。" />
+        <PolicyRow text="最终确认后，后端接收两个计数和最多 8 条相关联系人摘要，用于生成有依据的建议。" />
         <PolicyRow text="补充文字、结构化卡片、版本和执行状态会保存在服务端历史中。" />
         <PolicyRow text="截图会发送至配置的 AI 服务完成当次分析，Responses 请求关闭存储。" />
         <PrimaryButton

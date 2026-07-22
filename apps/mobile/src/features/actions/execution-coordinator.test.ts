@@ -33,8 +33,9 @@ const action = actionCardSchema.parse({
   updatedAt: '2026-07-22T05:00:00.000Z',
 });
 const preparation: ActionPreparation = {
-  mode: 'simulated',
+  mode: 'native',
   contacts: [],
+  relatedContacts: [],
   calendarConflicts: [
     {
       id: 'conflict-1',
@@ -132,7 +133,7 @@ describe('ActionExecutionCoordinator', () => {
     const gateway = createGateway(events);
     const execute = vi.fn(async () => {
       events.push('device');
-      return { mode: 'simulated' as const, nativeRecordRef: 'mock:event-1' };
+      return { mode: 'native' as const, nativeRecordRef: 'native:test-event-1' };
     });
     const coordinator = new ActionExecutionCoordinator(ledger, gateway, {
       prepare: vi.fn(),
@@ -150,6 +151,7 @@ describe('ActionExecutionCoordinator', () => {
         deviceContext: {
           possibleDuplicateContactCount: 0,
           calendarConflictCount: 1,
+          relatedContacts: [],
         },
       }),
     );
@@ -189,7 +191,7 @@ describe('ActionExecutionCoordinator', () => {
       events.push('device');
       attempts += 1;
       if (attempts === 1) throw new DeviceActionError('NO_WRITE', 'safe failure');
-      return { mode: 'simulated' as const, nativeRecordRef: 'mock:event-2' };
+      return { mode: 'native' as const, nativeRecordRef: 'native:test-event-2' };
     });
     const coordinator = new ActionExecutionCoordinator(ledger, gateway, {
       prepare: vi.fn(),
@@ -231,7 +233,7 @@ describe('ActionExecutionCoordinator', () => {
     };
     const execute = vi.fn(async () => {
       events.push('device');
-      return { mode: 'simulated' as const, nativeRecordRef: 'mock:event-3' };
+      return { mode: 'native' as const, nativeRecordRef: 'native:test-event-3' };
     });
     const coordinator = new ActionExecutionCoordinator(ledger, gateway, {
       prepare: vi.fn(),

@@ -10,11 +10,10 @@ const candidates = [
     familyName: '张',
     phones: ['+86 138-0013-8000'],
     emails: ['zhangming@example.com'],
-    company: '示例科技',
+    company: '测试公司',
     jobTitle: '产品经理',
     addresses: ['上海市静安区'],
     notes: null,
-    simulated: false,
   },
   {
     id: 'contact-2',
@@ -27,7 +26,6 @@ const candidates = [
     jobTitle: null,
     addresses: [],
     notes: null,
-    simulated: false,
   },
 ];
 
@@ -39,7 +37,7 @@ describe('contact matching', () => {
         displayName: '张明',
         phones: ['13800138000'],
         emails: [],
-        company: '示例科技',
+        company: '测试公司',
       },
       candidates,
     );
@@ -67,7 +65,7 @@ describe('contact matching', () => {
     });
     expect(payload.changes.map((change) => change.previousValue)).toEqual([
       '+86 138-0013-8000',
-      '示例科技',
+      '测试公司',
     ]);
   });
 });

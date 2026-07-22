@@ -42,10 +42,7 @@ export function ContactCandidates({
             <Text style={styles.avatarText}>{candidate.displayName.slice(0, 1)}</Text>
           </View>
           <View style={styles.contactCopy}>
-            <View style={styles.nameRow}>
-              <Text style={styles.name}>{candidate.displayName}</Text>
-              {candidate.simulated ? <Text style={styles.demoTag}>Web 演示候选</Text> : null}
-            </View>
+            <Text style={styles.name}>{candidate.displayName}</Text>
             {candidate.phones.length > 0 ? (
               <Text selectable style={styles.detail}>
                 {candidate.phones.join(' · ')}
@@ -121,20 +118,9 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing[1],
   },
-  nameRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing[2],
-  },
   name: {
     color: colors.ink,
     fontSize: 14,
-    fontWeight: '700',
-  },
-  demoTag: {
-    color: colors.blue,
-    fontSize: 10,
     fontWeight: '700',
   },
   detail: {
