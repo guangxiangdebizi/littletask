@@ -28,13 +28,9 @@ Responses API with `gpt-5.6-terra`, `xhigh`, and zero-data-retention mode, which
 ## Intake workspace
 
 Each analysis or review run creates a new in-memory action workspace. The agent receives one
-multimodal message containing the screenshot and optional note and can call only these tools:
-
-- `record_context`
-- `propose_create_event`
-- `propose_create_contact`
-- `propose_update_contact`
-- `finish_analysis`
+multimodal message containing the screenshot and optional note and can call only
+`submit_action_workspace`. The single call contains the complete context and all proposed actions;
+successful validation returns directly from the graph without another model turn.
 
 The tools write drafts only. They cannot access contacts, calendars, the network, a shell, or the
 filesystem. Every tool input is validated with Zod before it enters the workspace, and the complete
@@ -49,8 +45,8 @@ explicit revision-bound confirmation screen.
 ## Insight workspace
 
 After an action is confirmed and successfully executed, a separate ReAct run receives only the
-allowed evidence registry and successful action IDs. It can call `propose_insight` and
-`finish_insights`. Unknown action IDs or evidence IDs are rejected again before persistence.
+allowed evidence registry and successful action IDs. It can call only `submit_insight_workspace`.
+Unknown action IDs or evidence IDs are rejected again before persistence.
 
 iOS may include up to eight contact summaries related to the confirmed card: display name,
 company, job title, and whether a phone or email exists. It never uploads an address-book export or

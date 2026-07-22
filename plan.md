@@ -34,7 +34,7 @@ PostgreSQL 17 和现有有效证书；原 Roundcube Webmail 保留在 `/webmail/
 
 当前原生执行模块已完成代码和自动化验证：三类卡片可编辑并绑定 revision；权限只在用户主动设备核对时请求；联系人消歧、日历冲突、最终确认、SQLite 防重复账本、失败重试和不确定结果恢复已接通；Web 只能查看和编辑卡片，执行路径会被明确阻止；iOS JavaScript bundle 已通过。尚未把“真机写入”标记为验收通过，需在 EAS/TestFlight 构建后用专用联系人和日历回归。
 
-当前洞察模块已完成：确认或执行结果变化后会重新计算规则事实与建议；日历冲突、潜在重复联系人、执行失败、缺失字段和相关应用历史均带结构化依据。最终确认时，iOS 只提交与当前卡片匹配的最多 8 条联系人摘要（姓名、公司、职位、是否已有电话/邮箱），不上传整本通讯录和具体号码。动作成功后，独立持久化队列把服务端编号后的证据注册表交给 insight workspace，ReAct agent 只能调用提议建议与完成工具；未知 action/evidence ID 会在持久化前再次被拒绝。
+当前洞察模块已完成：确认或执行结果变化后会重新计算规则事实与建议；日历冲突、潜在重复联系人、执行失败、缺失字段和相关应用历史均带结构化依据。最终确认时，iOS 只提交与当前卡片匹配的最多 8 条联系人摘要（姓名、公司、职位、是否已有电话/邮箱），不上传整本通讯录和具体号码。动作成功后，独立持久化队列把服务端编号后的证据注册表交给 insight workspace，ReAct agent 只能调用一次 `submit_insight_workspace`；未知 action/evidence ID 会在持久化前再次被拒绝。
 
 生产安全边界已补齐：App 首次使用创建匿名设备会话，iOS 令牌存入 Keychain，服务端只保存 SHA-256；所有 intake、Action、执行、洞察、历史、汇总和删除查询强制按 `userId` 隔离，并支持完整账户删除。注册、上传和普通请求使用独立限额，Prometheus 指标只使用固定路由和状态标签，不记录用户内容。模型运行记录包含网关响应 ID、Token 用量、耗时和稳定错误码，不保存提示词、工具参数或模型原文。最终语义验收只通过 `/auth/device`、`/intakes`、持久化队列、worker 和轮询接口处理私有截图，并在完成后删除账户。
 
@@ -217,7 +217,7 @@ Web 版本仅用于上传、分析、卡片查看和编辑；联系人与日历�
 
 - Provider 名称为 `OpenAI`，但请求不发送到默认 OpenAI 地址，而是发送到用户指定的 OpenAI-compatible gateway：`https://api.hostcentral.cc`；
 - 使用 LangChain `createAgent` 构建基于 LangGraph 的 ReAct agent；
-- 每个 intake 创建独立内存 action workspace，模型只能调用 `record_context`、三种 `propose_*` 和 `finish_analysis`；
+- 每个 intake 创建独立内存 action workspace，模型只能调用一次 `submit_action_workspace` 提交完整草稿；
 - wire API 固定使用 Responses API；
 - 主分析模型使用 `gpt-5.6-terra`（即本项目所称 GPT-5.6-ter）；
 - 复核模型同样使用 `gpt-5.6-terra`；
