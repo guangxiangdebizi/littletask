@@ -30,8 +30,11 @@ import type {
   AnalyzeInput,
   ClaimedAnalysisJob,
   ClaimedSuggestionJob,
+  GroundedSuggestionDraft,
   IntakeStore,
   ModelRunRecord,
+  ModelResult,
+  ModelTelemetry,
 } from './types';
 
 export class DomainError extends Error {
@@ -505,14 +508,22 @@ export class IntakeService {
   private async runModelStage<T>(
     intakeId: string,
     stage: ModelRunRecord['stage'],
-    run: () => Promise<T>,
+    run: () => Promise<ModelResult<T>>,
   ): Promise<T> {
     const startedAt = new Date();
     const started = Date.now();
     try {
       const result = await run();
-      await this.recordModelRun(intakeId, stage, 'succeeded', startedAt, started, null);
-      return result;
+      await this.recordModelRun(
+        intakeId,
+        stage,
+        'succeeded',
+        startedAt,
+        started,
+        result.telemetry,
+        null,
+      );
+      return result.data;
     } catch (error) {
       try {
         await this.recordModelRun(
@@ -521,6 +532,7 @@ export class IntakeService {
           'failed',
           startedAt,
           started,
+          this.telemetryFromError(error),
           this.errorCode(
             error,
             stage === 'insight' ? 'INSIGHT_GENERATION_FAILED' : 'ANALYSIS_FAILED',
@@ -539,6 +551,7 @@ export class IntakeService {
     status: ModelRunRecord['status'],
     startedAt: Date,
     started: number,
+    telemetry: ModelTelemetry,
     errorCode: string | null,
   ): Promise<void> {
     return this.store.recordModelRun({
@@ -552,6 +565,10 @@ export class IntakeService {
       promptVersion: this.options.promptVersion,
       schemaVersion: this.options.schemaVersion,
       durationMs: Math.max(0, Date.now() - started),
+      inputTokens: telemetry.inputTokens,
+      outputTokens: telemetry.outputTokens,
+      totalTokens: telemetry.totalTokens,
+      responseId: telemetry.responseId,
       errorCode,
       startedAt,
       completedAt: new Date(),
@@ -593,7 +610,7 @@ export class IntakeService {
 
   private materializeSuggestions(
     job: ClaimedSuggestionJob,
-    drafts: Awaited<ReturnType<AIProvider['suggestInsights']>>,
+    drafts: GroundedSuggestionDraft[],
     currentInsights: Insight[],
   ): Insight[] {
     const actionIds = new Set(job.actions.map((action) => action.id));
@@ -678,6 +695,32 @@ export class IntakeService {
     return fallback;
   }
 
+  private telemetryFromError(error: unknown): ModelTelemetry {
+    if (typeof error !== 'object' || error === null || !('telemetry' in error)) {
+      return emptyTelemetry();
+    }
+    const telemetry = error.telemetry;
+    if (typeof telemetry !== 'object' || telemetry === null) return emptyTelemetry();
+    return {
+      responseId: this.safeResponseId('responseId' in telemetry ? telemetry.responseId : null),
+      inputTokens: this.safeTokenCount('inputTokens' in telemetry ? telemetry.inputTokens : null),
+      outputTokens: this.safeTokenCount(
+        'outputTokens' in telemetry ? telemetry.outputTokens : null,
+      ),
+      totalTokens: this.safeTokenCount('totalTokens' in telemetry ? telemetry.totalTokens : null),
+    };
+  }
+
+  private safeResponseId(value: unknown): string | null {
+    return typeof value === 'string' && /^[A-Za-z0-9_-]{1,255}$/.test(value) ? value : null;
+  }
+
+  private safeTokenCount(value: unknown): number | null {
+    return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 2_147_483_647
+      ? Number(value)
+      : null;
+  }
+
   private safeAnalysisMessage(error: unknown): string {
     const code = this.errorCode(error);
     if (
@@ -690,4 +733,8 @@ export class IntakeService {
     }
     return 'Analysis failed during validation or persistence';
   }
+}
+
+function emptyTelemetry(): ModelTelemetry {
+  return { responseId: null, inputTokens: null, outputTokens: null, totalTokens: null };
 }

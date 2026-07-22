@@ -25,7 +25,7 @@ Pino redacts authorization, cookies, API keys, and response cookies. Application
 
 `GET /api/metrics` exports Prometheus text with only HTTP method, fixed Fastify route template, and status class labels. It does not use intake IDs, action IDs, users, IPs, filenames, or error messages as labels. Nginx must deny this endpoint publicly; monitoring should scrape it locally.
 
-Model runs persist provider, model, stage, status, reasoning effort, prompt/schema versions, bounded error code, and duration. The schema reserves response and token-usage fields; the next observability module will populate them from gateway metadata without storing model bodies.
+Model runs persist provider, model, stage, status, reasoning effort, prompt/schema versions, bounded error code, duration, a validated response ID, and non-negative token counts returned by the gateway. Prompts, response bodies, and screenshot bytes are never copied into model-run audit rows.
 
 ## Production boundary
 

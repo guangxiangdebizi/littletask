@@ -51,12 +51,19 @@ const modelDraft = {
   ],
 } as const;
 
-function modelResponse() {
+function modelResponse(value: unknown = modelDraft) {
   return {
     id: 'resp_test',
     object: 'response',
     created_at: 1_753_159_200,
     status: 'completed',
+    usage: {
+      input_tokens: 321,
+      output_tokens: 123,
+      total_tokens: 444,
+      input_tokens_details: { cached_tokens: 0 },
+      output_tokens_details: { reasoning_tokens: 42 },
+    },
     output: [
       {
         id: 'msg_test',
@@ -66,7 +73,7 @@ function modelResponse() {
         content: [
           {
             type: 'output_text',
-            text: JSON.stringify(modelDraft),
+            text: JSON.stringify(value),
             annotations: [],
           },
         ],
@@ -116,10 +123,16 @@ describe('OpenAIProvider', () => {
     };
 
     const analyzed = await provider.analyze(input);
-    const reviewed = await provider.review(input, analyzed);
+    const reviewed = await provider.review(input, analyzed.data);
 
-    expect(analyzed.actions).toHaveLength(1);
-    expect(reviewed.actions[0]?.type).toBe('create_event');
+    expect(analyzed.data.actions).toHaveLength(1);
+    expect(reviewed.data.actions[0]?.type).toBe('create_event');
+    expect(analyzed.telemetry).toEqual({
+      responseId: 'resp_test',
+      inputTokens: 321,
+      outputTokens: 123,
+      totalTokens: 444,
+    });
     expect(captured).toHaveLength(2);
 
     const analysisRequest = captured[0];
@@ -179,6 +192,44 @@ describe('OpenAIProvider', () => {
     ).rejects.toMatchObject({
       code: 'MODEL_AUTH_FAILED',
       message: 'Model gateway authentication failed',
+    });
+  });
+
+  it('retains response usage when structured output validation fails', async () => {
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      baseURL: 'https://api.hostcentral.cc',
+      model: 'gpt-5.6-terra',
+      reviewModel: 'gpt-5.6-terra',
+      reasoningEffort: 'xhigh',
+      store: false,
+      timeoutMs: 10_000,
+      maxRetries: 0,
+      maxOutputTokens: 16_000,
+      fetch: async () =>
+        new Response(JSON.stringify(modelResponse({ summary: 'schema is incomplete' })), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    });
+
+    await expect(
+      provider.analyze({
+        image: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+        mimeType: 'image/png',
+        note: null,
+        locale: 'zh-CN',
+        timezone: 'Asia/Shanghai',
+        now: new Date('2026-07-22T12:00:00+08:00'),
+      }),
+    ).rejects.toMatchObject({
+      code: 'MODEL_OUTPUT_INVALID',
+      telemetry: {
+        responseId: 'resp_test',
+        inputTokens: 321,
+        outputTokens: 123,
+        totalTokens: 444,
+      },
     });
   });
 });

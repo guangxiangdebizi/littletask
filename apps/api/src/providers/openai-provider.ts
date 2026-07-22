@@ -3,7 +3,7 @@ import { zodTextFormat } from 'openai/helpers/zod';
 import sharp from 'sharp';
 import { ZodError } from 'zod';
 
-import type { AIProvider, AnalyzeInput } from '../types';
+import type { AIProvider, AnalyzeInput, ModelTelemetry } from '../types';
 import {
   modelAnalysisDraftSchema,
   modelGroundedSuggestionsSchema,
@@ -68,6 +68,7 @@ export class ModelProviderError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    readonly telemetry: ModelTelemetry = emptyTelemetry(),
   ) {
     super(message);
     this.name = 'ModelProviderError';
@@ -89,9 +90,10 @@ export class OpenAIProvider implements AIProvider {
 
   async analyze(input: AnalyzeInput) {
     const imageUrl = await this.toImageDataUrl(input);
+    let telemetry = emptyTelemetry();
 
     try {
-      const response = await this.client.responses.parse({
+      const response = await this.client.responses.create({
         model: this.options.model,
         instructions: ANALYSIS_INSTRUCTIONS,
         input: [
@@ -110,18 +112,20 @@ export class OpenAIProvider implements AIProvider {
           format: zodTextFormat(modelAnalysisDraftSchema, 'littletask_analysis'),
         },
       });
+      telemetry = this.readTelemetry(response);
 
-      return this.readDraft(response.output_parsed);
+      return { data: this.readDraft(response.output_text), telemetry };
     } catch (error) {
-      throw this.safeError(error, 'analysis');
+      throw this.safeError(error, 'analysis', telemetry);
     }
   }
 
   async review(input: AnalyzeInput, draft: Parameters<AIProvider['review']>[1]) {
     const imageUrl = await this.toImageDataUrl(input);
+    let telemetry = emptyTelemetry();
 
     try {
-      const response = await this.client.responses.parse({
+      const response = await this.client.responses.create({
         model: this.options.reviewModel,
         instructions: REVIEW_INSTRUCTIONS,
         input: [
@@ -143,16 +147,18 @@ export class OpenAIProvider implements AIProvider {
           format: zodTextFormat(modelAnalysisDraftSchema, 'littletask_review'),
         },
       });
+      telemetry = this.readTelemetry(response);
 
-      return this.readDraft(response.output_parsed);
+      return { data: this.readDraft(response.output_text), telemetry };
     } catch (error) {
-      throw this.safeError(error, 'review');
+      throw this.safeError(error, 'review', telemetry);
     }
   }
 
   async suggestInsights(input: Parameters<AIProvider['suggestInsights']>[0]) {
+    let telemetry = emptyTelemetry();
     try {
-      const response = await this.client.responses.parse({
+      const response = await this.client.responses.create({
         model: this.options.model,
         instructions: INSIGHT_INSTRUCTIONS,
         input: [
@@ -178,12 +184,15 @@ export class OpenAIProvider implements AIProvider {
           format: zodTextFormat(modelGroundedSuggestionsSchema, 'littletask_insights'),
         },
       });
-      if (!response.output_parsed) {
-        throw new ModelProviderError('MODEL_OUTPUT_MISSING', 'Model returned no insight result');
-      }
-      return modelGroundedSuggestionsSchema.parse(response.output_parsed).suggestions;
+      telemetry = this.readTelemetry(response);
+      return {
+        data: modelGroundedSuggestionsSchema.parse(
+          this.readJson(response.output_text, 'Model returned no insight result'),
+        ).suggestions,
+        telemetry,
+      };
     } catch (error) {
-      throw this.safeError(error, 'insight');
+      throw this.safeError(error, 'insight', telemetry);
     }
   }
 
@@ -198,11 +207,21 @@ export class OpenAIProvider implements AIProvider {
     ].join('\n');
   }
 
-  private readDraft(value: unknown) {
-    if (value === null || value === undefined) {
-      throw new ModelProviderError('MODEL_OUTPUT_MISSING', 'Model returned no structured result');
+  private readDraft(value: string) {
+    return toAnalysisDraft(
+      modelAnalysisDraftSchema.parse(
+        this.readJson(value, 'Model returned no structured analysis result'),
+      ),
+    );
+  }
+
+  private readJson(value: string, missingMessage: string): unknown {
+    if (!value) throw new ModelProviderError('MODEL_OUTPUT_MISSING', missingMessage);
+    try {
+      return JSON.parse(value);
+    } catch {
+      throw new ModelProviderError('MODEL_OUTPUT_INVALID', 'Model returned invalid JSON');
     }
-    return toAnalysisDraft(modelAnalysisDraftSchema.parse(value));
   }
 
   private async toImageDataUrl(input: AnalyzeInput): Promise<string> {
@@ -231,12 +250,33 @@ export class OpenAIProvider implements AIProvider {
     );
   }
 
-  private safeError(error: unknown, stage: 'analysis' | 'review' | 'insight'): ModelProviderError {
-    if (error instanceof ModelProviderError) return error;
+  private readTelemetry(response: {
+    id: string;
+    usage?: { input_tokens: number; output_tokens: number; total_tokens: number };
+  }): ModelTelemetry {
+    return {
+      responseId: /^[A-Za-z0-9_-]{1,255}$/.test(response.id) ? response.id : null,
+      inputTokens: safeTokenCount(response.usage?.input_tokens),
+      outputTokens: safeTokenCount(response.usage?.output_tokens),
+      totalTokens: safeTokenCount(response.usage?.total_tokens),
+    };
+  }
+
+  private safeError(
+    error: unknown,
+    stage: 'analysis' | 'review' | 'insight',
+    telemetry: ModelTelemetry = emptyTelemetry(),
+  ): ModelProviderError {
+    if (error instanceof ModelProviderError) {
+      return hasTelemetry(telemetry)
+        ? new ModelProviderError(error.code, error.message, telemetry)
+        : error;
+    }
     if (error instanceof ZodError) {
       return new ModelProviderError(
         'MODEL_OUTPUT_INVALID',
         `Model ${stage} returned an invalid structured result`,
+        telemetry,
       );
     }
 
@@ -245,20 +285,44 @@ export class OpenAIProvider implements AIProvider {
         ? Number(error.status)
         : undefined;
     if (status === 401 || status === 403) {
-      return new ModelProviderError('MODEL_AUTH_FAILED', 'Model gateway authentication failed');
+      return new ModelProviderError(
+        'MODEL_AUTH_FAILED',
+        'Model gateway authentication failed',
+        telemetry,
+      );
     }
     if (status === 429) {
-      return new ModelProviderError('MODEL_RATE_LIMITED', 'Model gateway rate limit reached');
+      return new ModelProviderError(
+        'MODEL_RATE_LIMITED',
+        'Model gateway rate limit reached',
+        telemetry,
+      );
     }
     if (status !== undefined && Number.isFinite(status)) {
       return new ModelProviderError(
         'MODEL_GATEWAY_ERROR',
         `Model ${stage} request failed with status ${status}`,
+        telemetry,
       );
     }
     return new ModelProviderError(
       'MODEL_GATEWAY_UNAVAILABLE',
       `Model ${stage} request could not reach the gateway`,
+      telemetry,
     );
   }
+}
+
+function emptyTelemetry(): ModelTelemetry {
+  return { responseId: null, inputTokens: null, outputTokens: null, totalTokens: null };
+}
+
+function hasTelemetry(telemetry: ModelTelemetry): boolean {
+  return Object.values(telemetry).some((value) => value !== null);
+}
+
+function safeTokenCount(value: number | undefined): number | null {
+  return value !== undefined && Number.isInteger(value) && value >= 0 && value <= 2_147_483_647
+    ? value
+    : null;
 }

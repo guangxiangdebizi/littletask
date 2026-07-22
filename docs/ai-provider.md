@@ -37,6 +37,11 @@ Both requests set:
 
 The model-facing schema uses required nullable fields because strict Structured Outputs requires every property to be present. The provider converts those nullable values back into the narrower application contract and validates the result again before materializing Action Cards.
 
+Each provider result carries a separate minimal telemetry envelope. The service persists a bounded
+response ID plus non-negative input, output, and total token counts when the gateway supplies them.
+Structured-output validation failures retain that metadata for cost and reliability auditing, but
+never persist the model body.
+
 ## Security boundaries
 
 - Screenshot text, the optional note, and the first-pass draft are explicitly marked as untrusted data in the prompts.
@@ -61,3 +66,5 @@ Before deploying:
 7. Keep fake-provider use explicit and confined to test process configuration.
 
 Reference behavior follows the official OpenAI [vision input](https://developers.openai.com/api/docs/guides/images-vision) and [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) contracts. The configured gateway remains subject to an explicit compatibility smoke test.
+
+The synthetic end-to-end suite is documented in [ai-evals.md](./ai-evals.md).

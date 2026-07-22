@@ -20,10 +20,22 @@ export interface AnalyzeInput {
   now: Date;
 }
 
+export interface ModelTelemetry {
+  responseId: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+}
+
+export interface ModelResult<T> {
+  data: T;
+  telemetry: ModelTelemetry;
+}
+
 export interface AIProvider {
-  analyze(input: AnalyzeInput): Promise<AnalysisDraft>;
-  review(input: AnalyzeInput, draft: AnalysisDraft): Promise<AnalysisDraft>;
-  suggestInsights(input: GroundedSuggestionInput): Promise<GroundedSuggestionDraft[]>;
+  analyze(input: AnalyzeInput): Promise<ModelResult<AnalysisDraft>>;
+  review(input: AnalyzeInput, draft: AnalysisDraft): Promise<ModelResult<AnalysisDraft>>;
+  suggestInsights(input: GroundedSuggestionInput): Promise<ModelResult<GroundedSuggestionDraft[]>>;
 }
 
 export interface GroundedSuggestionDraft {
@@ -62,6 +74,10 @@ export interface ModelRunRecord {
   promptVersion: string;
   schemaVersion: string;
   durationMs: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  responseId: string | null;
   errorCode: string | null;
   startedAt: Date;
   completedAt: Date;
