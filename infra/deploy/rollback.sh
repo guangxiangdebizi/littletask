@@ -57,20 +57,33 @@ switch_current() {
   mv -Tf "${temporary_link}" "${APP_ROOT}/current"
 }
 
-reload_processes() {
+replace_processes() {
+  pm2 delete littletask-api littletask-worker >/dev/null 2>&1 || true
   env \
     LITTLETASK_ENV_FILE="${ENV_FILE}" \
     LITTLETASK_LOG_DIR="${APP_ROOT}/shared/logs" \
     LITTLETASK_NODE="${NODE_HOME}/bin/node" \
     LITTLETASK_RUN_USER="${RUN_USER}" \
-    pm2 startOrReload "${APP_ROOT}/current/infra/pm2/ecosystem.config.cjs" --update-env
+    pm2 start "${APP_ROOT}/current/infra/pm2/ecosystem.config.cjs" --update-env
+}
+
+wait_for_application() {
+  for _attempt in $(seq 1 30); do
+    if curl --fail --silent --show-error --max-time 3 \
+      http://127.0.0.1:3100/api/health/ready >/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
 }
 
 switch_current "${target}"
-if ! reload_processes || ! curl --fail --silent --show-error --max-time 5 \
-  http://127.0.0.1:3100/api/health/ready >/dev/null; then
+if ! replace_processes || ! wait_for_application; then
   switch_current "${current_target}"
-  reload_processes || true
+  if replace_processes; then
+    wait_for_application || true
+  fi
   echo "Rollback target failed readiness; restored the original current release" >&2
   exit 1
 fi

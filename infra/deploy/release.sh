@@ -133,19 +133,20 @@ fi
 
 switch_current "${release_directory}"
 
-reload_processes() {
+replace_processes() {
+  pm2 delete littletask-api littletask-worker >/dev/null 2>&1 || true
   env \
     LITTLETASK_ENV_FILE="${ENV_FILE}" \
     LITTLETASK_LOG_DIR="${APP_ROOT}/shared/logs" \
     LITTLETASK_NODE="${NODE_HOME}/bin/node" \
     LITTLETASK_RUN_USER="${RUN_USER}" \
-    pm2 startOrReload "${current_link}/infra/pm2/ecosystem.config.cjs" --update-env
+    pm2 start "${current_link}/infra/pm2/ecosystem.config.cjs" --update-env
 }
 
 rollback_after_failure() {
   if [[ -n "${previous_release}" && -d "${previous_release}" ]]; then
     switch_current "${previous_release}"
-    reload_processes || true
+    replace_processes || true
   else
     pm2 delete littletask-api littletask-worker >/dev/null 2>&1 || true
     if [[ -L "${current_link}" && "$(readlink -f "${current_link}")" == "${release_directory}" ]]; then
@@ -154,9 +155,9 @@ rollback_after_failure() {
   fi
 }
 
-if ! reload_processes; then
+if ! replace_processes; then
   rollback_after_failure
-  echo "PM2 reload failed; current release was restored when possible" >&2
+  echo "PM2 start failed; current release was restored when possible" >&2
   exit 1
 fi
 
