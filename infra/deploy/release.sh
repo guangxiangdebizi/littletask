@@ -68,6 +68,13 @@ run_as_app() {
     "$@"
 }
 
+run_in_release() {
+  (
+    cd "${release_directory}"
+    run_as_app "$@"
+  )
+}
+
 cleanup_temporary_link() {
   if [[ -L "${temporary_link}" ]]; then
     rm -f -- "${temporary_link}"
@@ -95,8 +102,8 @@ if [[ "${checked_out_sha}" != "${RELEASE_SHA}" ]]; then
   exit 1
 fi
 
-run_as_app "${NODE_HOME}/bin/corepack" pnpm install --frozen-lockfile --prod=false
-run_as_app env EXPO_PUBLIC_API_URL="${PUBLIC_API_URL}" \
+run_in_release "${NODE_HOME}/bin/corepack" pnpm install --frozen-lockfile --prod=false
+run_in_release env EXPO_PUBLIC_API_URL="${PUBLIC_API_URL}" \
   "${NODE_HOME}/bin/corepack" pnpm build
 
 docker compose --env-file "${ENV_FILE}" \
@@ -115,7 +122,7 @@ if [[ "${database_ready}" != true ]]; then
   exit 1
 fi
 
-run_as_app env LITTLETASK_ENV_FILE="${ENV_FILE}" \
+run_in_release env LITTLETASK_ENV_FILE="${ENV_FILE}" \
   "${NODE_HOME}/bin/corepack" pnpm db:migrate:deploy
 
 if [[ -n "${previous_release}" ]]; then
