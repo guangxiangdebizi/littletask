@@ -6,13 +6,35 @@ import { ZodError } from 'zod';
 import { loadConfig, type AppConfig } from './config';
 import { DomainError, IntakeService } from './intake-service';
 import { FakeAIProvider } from './providers/fake-provider';
+import { OpenAIProvider } from './providers/openai-provider';
 import { healthRoutes } from './routes/health';
 import { intakeRoutes } from './routes/intakes';
 import { InMemoryIntakeStore } from './stores/in-memory-store';
+import type { AIProvider } from './types';
 
-interface BuildAppOptions {
+export interface BuildAppOptions {
   config?: AppConfig;
   logger?: boolean;
+  provider?: AIProvider;
+}
+
+function createAIProvider(config: AppConfig): AIProvider {
+  if (config.AI_PROVIDER === 'fake') return new FakeAIProvider();
+  if (!config.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is required when AI_PROVIDER=openai');
+  }
+
+  return new OpenAIProvider({
+    apiKey: config.OPENAI_API_KEY,
+    baseURL: config.OPENAI_BASE_URL,
+    model: config.OPENAI_MODEL,
+    reviewModel: config.OPENAI_REVIEW_MODEL,
+    reasoningEffort: config.OPENAI_REASONING_EFFORT,
+    store: config.OPENAI_STORE,
+    timeoutMs: config.OPENAI_TIMEOUT_MS,
+    maxRetries: config.OPENAI_MAX_RETRIES,
+    maxOutputTokens: config.OPENAI_MAX_OUTPUT_TOKENS,
+  });
 }
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
@@ -43,7 +65,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     bodyLimit: config.MAX_UPLOAD_BYTES + 128 * 1024,
   });
 
-  const provider = new FakeAIProvider();
+  const provider = options.provider ?? createAIProvider(config);
   const store = new InMemoryIntakeStore();
   app.decorate('appConfig', config);
   app.decorate('intakeService', new IntakeService(store, provider));

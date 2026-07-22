@@ -22,7 +22,7 @@ The project is in active development. The first vertical slice is available with
 - Simulate execution in the Web acceptance build
 - Receive deterministic follow-up insights
 
-Real model inference, PostgreSQL persistence, and native Contacts/Calendar execution are being implemented in the next stages. The full product and delivery plan is documented in [plan.md](./plan.md).
+The GPT-5.6 Terra provider is implemented behind an environment switch with stateless analysis and review requests. A rotated runtime credential is still required for the live gateway compatibility check. PostgreSQL persistence and native Contacts/Calendar execution are the next implementation stages. The full product and delivery plan is documented in [plan.md](./plan.md).
 
 ## Stack
 
@@ -82,7 +82,9 @@ corepack pnpm check
 
 ## AI configuration
 
-The committed configuration defaults to `AI_PROVIDER=fake`. Real inference uses the environment variables documented in `.env.example`; no API key is stored in Git. Every real Responses API request must use `store: false`.
+The committed configuration defaults to `AI_PROVIDER=fake`. To enable real inference, set `AI_PROVIDER=openai` and inject `OPENAI_API_KEY` at runtime. The provider sends the screenshot twice through the OpenAI-compatible Responses API: first for extraction, then for an independent evidence review. It uses `gpt-5.6-terra`, `xhigh` reasoning, Structured Outputs, original-detail vision input, and `store: false` on every request.
+
+HEIC screenshots are converted to high-quality JPEG in memory before inference. Original screenshot bytes are not persisted by the current API. See [docs/ai-provider.md](./docs/ai-provider.md) for the request contract and gateway smoke-test checklist.
 
 ## Security
 

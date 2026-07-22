@@ -12,7 +12,8 @@
 - [x] 完成 React Native / Expo Web 可运行验收客户端及 Fake AI 端到端链路。
 - [x] 完成 Fastify API、上传校验、确认门禁、幂等执行接口和历史接口。
 - [ ] 接入 PostgreSQL 持久化与可恢复异步任务队列。
-- [ ] 接入 GPT-5.6 Terra 多模态分析与独立复核，并完成网关兼容性测试。
+- [x] 实现 GPT-5.6 Terra 多模态分析、Structured Outputs、独立复核和安全错误边界。
+- [ ] 更换已暴露的测试密钥后，完成真实网关兼容性与质量样例测试。
 - [ ] 接入 iOS Contacts / Calendar 原生执行与本地冲突、重复项检查。
 - [ ] 完成设备测试、TestFlight、`manbaout.com` Nginx / SSL / PM2 部署。
 
