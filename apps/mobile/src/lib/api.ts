@@ -6,6 +6,7 @@ import {
   type ActionCard,
   type ActionPatchRequest,
   type CreateIntakeResponse,
+  type ExecutionDeviceContext,
   type Insight,
   type Intake,
 } from '@littletask/contracts';
@@ -137,6 +138,7 @@ export async function reportActionExecution(
     status: 'succeeded' | 'failed';
     nativeRecordRef?: string;
     errorMessage?: string;
+    deviceContext: ExecutionDeviceContext;
   },
 ): Promise<ActionCard> {
   const body = await requestJson(`/actions/${actionId}/execution-result`, {
@@ -148,6 +150,7 @@ export async function reportActionExecution(
       status: input.status,
       ...(input.nativeRecordRef ? { nativeRecordRef: input.nativeRecordRef } : {}),
       ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
+      deviceContext: input.deviceContext,
     }),
   });
   return actionCardSchema.parse(body);

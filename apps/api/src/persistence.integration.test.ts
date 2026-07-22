@@ -1,3 +1,4 @@
+import type { ActionCard, Insight } from '@littletask/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { buildApp } from './app';
@@ -80,7 +81,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
     expect(analyzed.statusCode).toBe(200);
     const intake = analyzed.json<{
       status: string;
-      actions: Array<{ id: string; revision: number; status: string }>;
+      actions: ActionCard[];
     }>();
     expect(intake.status).toBe('ready');
     expect(intake.actions).toHaveLength(3);
@@ -104,13 +105,19 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
           idempotencyKey,
           status: 'succeeded',
           nativeRecordRef: 'native-calendar-record-1',
+          deviceContext: {
+            possibleDuplicateContactCount: 0,
+            calendarConflictCount: 2,
+          },
         },
       });
       expect(executed.statusCode).toBe(200);
     }
 
-    const retryableAction = intake.actions[1];
-    if (!retryableAction) throw new Error('Expected a retryable contact action');
+    const retryableAction = intake.actions.find((item) => item.type === 'create_contact');
+    if (!retryableAction) {
+      throw new Error('Expected a retryable contact action');
+    }
     const confirmationKey = crypto.randomUUID();
     const failedExecutionKey = crypto.randomUUID();
     const successfulExecutionKey = crypto.randomUUID();
@@ -131,6 +138,10 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
         confirmationIdempotencyKey: confirmationKey,
         status: 'failed',
         errorMessage: 'CONTACT_WRITE_FAILED',
+        deviceContext: {
+          possibleDuplicateContactCount: 1,
+          calendarConflictCount: 0,
+        },
       },
     });
     expect(failedExecution.json<{ status: string }>().status).toBe('failed');
@@ -142,6 +153,10 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
         confirmationIdempotencyKey: confirmationKey,
         status: 'succeeded',
         nativeRecordRef: 'native-contact-record-1',
+        deviceContext: {
+          possibleDuplicateContactCount: 1,
+          calendarConflictCount: 0,
+        },
       },
     });
     expect(successfulRetry.json<{ status: string }>().status).toBe('succeeded');
@@ -164,12 +179,35 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence and queue', () => {
     });
     expect(execution.nativeRecordRef).toMatch(/^sha256:/);
     expect(execution.nativeRecordRef).not.toContain('native-calendar-record-1');
+    expect(execution.deviceContext).toEqual({
+      possibleDuplicateContactCount: 0,
+      calendarConflictCount: 2,
+    });
+
+    const insights = await prisma.insight.findMany({ where: { intakeId: id } });
+    expect(insights).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'observation', type: 'schedule_conflict' }),
+        expect.objectContaining({ kind: 'observation', type: 'duplicate_contact' }),
+        expect.objectContaining({ kind: 'suggestion', type: 'meeting_preparation' }),
+      ]),
+    );
 
     const apiSecondRestart = await buildApp({ config, logger: false, inlineWorker: false });
     const history = await apiSecondRestart.inject({ method: 'GET', url: '/api/v1/history' });
     expect(history.statusCode).toBe(200);
     expect(history.json<{ items: Array<{ id: string }> }>().items.map((item) => item.id)).toContain(
       id,
+    );
+    const persistedInsights = await apiSecondRestart.inject({
+      method: 'GET',
+      url: `/api/v1/intakes/${id}/insights`,
+    });
+    expect(persistedInsights.json<{ items: Insight[] }>().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'schedule_conflict', kind: 'observation' }),
+        expect.objectContaining({ type: 'duplicate_contact', kind: 'observation' }),
+      ]),
     );
     await apiSecondRestart.close();
   });

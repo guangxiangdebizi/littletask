@@ -15,6 +15,14 @@ export type {
 
 const storageKey = 'littletask.execution-ledger.v1';
 const memoryEntries = new Map<string, ExecutionLedgerEntry>();
+const emptyDeviceContext = {
+  possibleDuplicateContactCount: 0,
+  calendarConflictCount: 0,
+};
+
+function normalizeEntry(entry: ExecutionLedgerEntry): ExecutionLedgerEntry {
+  return { ...entry, deviceContext: entry.deviceContext ?? emptyDeviceContext };
+}
 
 function loadEntries(): Map<string, ExecutionLedgerEntry> {
   if (typeof globalThis.localStorage === 'undefined') return new Map(memoryEntries);
@@ -30,7 +38,7 @@ function loadEntries(): Map<string, ExecutionLedgerEntry> {
             'actionId' in entry &&
             'revision' in entry,
         )
-        .map((entry) => [ledgerKey(entry.actionId, entry.revision), entry]),
+        .map((entry) => [ledgerKey(entry.actionId, entry.revision), normalizeEntry(entry)]),
     );
   } catch {
     return new Map();
@@ -47,7 +55,8 @@ function saveEntries(entries: Map<string, ExecutionLedgerEntry>): void {
 
 export const executionLedger: ExecutionLedger = {
   async get(actionId, revision) {
-    return loadEntries().get(ledgerKey(actionId, revision)) ?? null;
+    const entry = loadEntries().get(ledgerKey(actionId, revision));
+    return entry ? normalizeEntry(entry) : null;
   },
 
   async prepare(action) {
@@ -71,6 +80,20 @@ export const executionLedger: ExecutionLedger = {
       ...current,
       ...patch,
       state,
+      updatedAt: new Date().toISOString(),
+    };
+    entries.set(ledgerKey(entry.actionId, entry.revision), updated);
+    saveEntries(entries);
+    return updated;
+  },
+
+  async setDeviceContext(entry, context) {
+    const entries = loadEntries();
+    const current = entries.get(ledgerKey(entry.actionId, entry.revision));
+    if (!current) throw new Error('Action execution ledger entry is missing');
+    const updated = {
+      ...current,
+      deviceContext: structuredClone(context),
       updatedAt: new Date().toISOString(),
     };
     entries.set(ledgerKey(entry.actionId, entry.revision), updated);

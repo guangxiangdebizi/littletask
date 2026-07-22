@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
 import {
   actionCardSchema,
+  executionDeviceContextSchema,
   insightSchema,
   intakeSchema,
   type Insight,
@@ -15,6 +16,7 @@ import type {
   ClaimedAnalysisJob,
   ExecutionRecordInput,
   ExecutionRecord,
+  ExecutionObservation,
   IntakeStore,
   ModelRunRecord,
 } from '../types';
@@ -225,6 +227,7 @@ export class PrismaIntakeStore implements IntakeStore {
         intakeId: row.intakeId,
         actionId: row.actionId ?? undefined,
         type: row.type,
+        kind: row.kind,
         priority: row.priority,
         title: row.title,
         body: row.body,
@@ -244,6 +247,7 @@ export class PrismaIntakeStore implements IntakeStore {
           intakeId,
           actionId: insight.actionId ?? null,
           type: insight.type,
+          kind: insight.kind,
           priority: insight.priority,
           title: insight.title,
           body: insight.body,
@@ -302,12 +306,42 @@ export class PrismaIntakeStore implements IntakeStore {
         status: input.status,
         nativeRecordRef,
         errorMessage: input.errorMessage ?? null,
+        deviceContext: input.deviceContext ? json(input.deviceContext) : Prisma.DbNull,
         createdAt: new Date(),
         updatedAt: new Date(),
       },
       update: { idempotencyKey: input.idempotencyKey },
     });
     return { actionId: row.actionId, status: row.status };
+  }
+
+  async listExecutionObservations(intakeId: string): Promise<ExecutionObservation[]> {
+    const rows = await this.prisma.actionExecution.findMany({
+      where: { action: { intakeId } },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        actionId: true,
+        status: true,
+        deviceContext: true,
+        errorMessage: true,
+        createdAt: true,
+      },
+    });
+    return rows.map((row) => ({
+      actionId: row.actionId,
+      status: row.status,
+      deviceContext: executionDeviceContextSchema.parse(
+        row.deviceContext ?? {
+          possibleDuplicateContactCount: 0,
+          calendarConflictCount: 0,
+        },
+      ),
+      errorCode:
+        row.errorMessage && /^[A-Z][A-Z0-9_]{1,79}$/.test(row.errorMessage)
+          ? row.errorMessage
+          : null,
+      createdAt: row.createdAt.toISOString(),
+    }));
   }
 
   async claimAnalysisJob(

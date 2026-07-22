@@ -1,6 +1,6 @@
 import { setTimeout as wait } from 'node:timers/promises';
 
-import type { ActionCard } from '@littletask/contracts';
+import type { ActionCard, Insight } from '@littletask/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { buildApp } from './app';
@@ -115,7 +115,15 @@ describe('LittleTask API', () => {
     const executed = await app.inject({
       method: 'POST',
       url: `/api/v1/actions/${action.id}/execution-result`,
-      payload: { idempotencyKey, status: 'succeeded', nativeRecordRef: 'test-calendar-1' },
+      payload: {
+        idempotencyKey,
+        status: 'succeeded',
+        nativeRecordRef: 'test-calendar-1',
+        deviceContext: {
+          possibleDuplicateContactCount: 0,
+          calendarConflictCount: 2,
+        },
+      },
     });
     expect(executed.statusCode).toBe(200);
     expect(executed.json<{ status: string }>().status).toBe('succeeded');
@@ -125,10 +133,27 @@ describe('LittleTask API', () => {
       url: `/api/v1/intakes/${id}/insights`,
     });
     expect(insights.statusCode).toBe(200);
-    expect(insights.json<{ items: unknown[] }>().items.length).toBeGreaterThan(0);
+    const insightItems = insights.json<{ items: Insight[] }>().items;
+    expect(insightItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionId: action.id,
+          type: 'schedule_conflict',
+          kind: 'observation',
+          evidence: expect.arrayContaining([expect.objectContaining({ source: 'calendar_check' })]),
+        }),
+        expect.objectContaining({
+          actionId: action.id,
+          type: 'meeting_preparation',
+          kind: 'suggestion',
+        }),
+      ]),
+    );
 
-    const retryableAction = intake.actions[1];
-    if (!retryableAction) throw new Error('Expected a second action');
+    const retryableAction = intake.actions.find((item) => item.type === 'create_contact');
+    if (!retryableAction) {
+      throw new Error('Expected a create-contact action');
+    }
     const confirmationIdempotencyKey = crypto.randomUUID();
     await app.inject({
       method: 'POST',
@@ -147,6 +172,10 @@ describe('LittleTask API', () => {
         confirmationIdempotencyKey,
         status: 'failed',
         errorMessage: 'DEVICE_WRITE_FAILED',
+        deviceContext: {
+          possibleDuplicateContactCount: 1,
+          calendarConflictCount: 0,
+        },
       },
     });
     expect(failed.json<{ status: string }>().status).toBe('failed');
@@ -183,6 +212,10 @@ describe('LittleTask API', () => {
         confirmationIdempotencyKey,
         status: 'succeeded',
         nativeRecordRef: 'test-contact-1',
+        deviceContext: {
+          possibleDuplicateContactCount: 1,
+          calendarConflictCount: 0,
+        },
       },
     });
     expect(retried.json<{ status: string }>().status).toBe('succeeded');
@@ -210,6 +243,21 @@ describe('LittleTask API', () => {
       },
     });
     expect(replayedFailure.json<{ status: string }>().status).toBe('succeeded');
+
+    const refreshedInsights = await app.inject({
+      method: 'GET',
+      url: `/api/v1/intakes/${id}/insights`,
+    });
+    expect(refreshedInsights.json<{ items: Insight[] }>().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionId: retryableAction.id,
+          type: 'duplicate_contact',
+          kind: 'observation',
+          evidence: expect.arrayContaining([expect.objectContaining({ source: 'contact_check' })]),
+        }),
+      ]),
+    );
 
     await app.close();
   });

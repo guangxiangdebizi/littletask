@@ -35,7 +35,15 @@ const action = actionCardSchema.parse({
 const preparation: ActionPreparation = {
   mode: 'simulated',
   contacts: [],
-  calendarConflicts: [],
+  calendarConflicts: [
+    {
+      id: 'conflict-1',
+      calendarTitle: '测试日历',
+      title: '已有安排',
+      startAt: '2026-07-23T07:30:00.000Z',
+      endAt: '2026-07-23T08:30:00.000Z',
+    },
+  ],
   calendarId: null,
 };
 
@@ -57,6 +65,10 @@ class MemoryLedger implements ExecutionLedger {
       state: 'prepared',
       nativeRecordRef: null,
       errorCode: null,
+      deviceContext: {
+        possibleDuplicateContactCount: 0,
+        calendarConflictCount: 0,
+      },
       createdAt: '2026-07-22T05:00:00.000Z',
       updatedAt: '2026-07-22T05:00:00.000Z',
     };
@@ -83,6 +95,14 @@ class MemoryLedger implements ExecutionLedger {
       errorCode: null,
       nativeRecordRef: null,
     };
+    return this.entry;
+  }
+
+  async setDeviceContext(
+    entry: ExecutionLedgerEntry,
+    context: ExecutionLedgerEntry['deviceContext'],
+  ) {
+    this.entry = { ...entry, deviceContext: context };
     return this.entry;
   }
 }
@@ -120,6 +140,15 @@ describe('ActionExecutionCoordinator', () => {
 
     expect(events).toEqual(['confirm', 'device', 'report:succeeded', 'report:succeeded']);
     expect(execute).toHaveBeenCalledTimes(1);
+    expect(gateway.report).toHaveBeenCalledWith(
+      action.id,
+      expect.objectContaining({
+        deviceContext: {
+          possibleDuplicateContactCount: 0,
+          calendarConflictCount: 1,
+        },
+      }),
+    );
   });
 
   it('blocks automatic retries when a native write may already exist', async () => {

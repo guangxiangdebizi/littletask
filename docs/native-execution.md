@@ -28,6 +28,8 @@ Contact matching normalizes names, Chinese phone prefixes, and email casing. Pho
 
 Calendar conflicts are events that overlap the proposed start/end interval. The client reads the selected interval across visible calendars, shows at most eight conflicts, and requires a separate acknowledgement before creation. Existing events are never changed.
 
+After final confirmation, the API receives only two bounded counts: possible duplicate contacts and overlapping calendar items (both capped at eight). Candidate names, phone numbers, email addresses, event titles, calendar names, and event times remain on the device and are never included in this context report. The counts are stored with the execution result solely to ground later observations.
+
 Attendee names are appended to event notes for reference. The MVP does not send calendar invitations.
 
 ## Device execution ledger

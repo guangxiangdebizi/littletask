@@ -194,7 +194,9 @@ export class IntakeService {
     });
     const actions = [...intake.actions];
     actions[actionIndex] = updated;
-    await this.store.replace({ ...intake, actions, updatedAt: updated.updatedAt });
+    const nextIntake = { ...intake, actions, updatedAt: updated.updatedAt };
+    await this.store.replace(nextIntake);
+    await this.refreshDerivedInsights(nextIntake);
     return updated;
   }
 
@@ -251,6 +253,7 @@ export class IntakeService {
           ? {}
           : { nativeRecordRef: request.nativeRecordRef }),
         ...(request.errorMessage === undefined ? {} : { errorMessage: request.errorMessage }),
+        ...(request.deviceContext === undefined ? {} : { deviceContext: request.deviceContext }),
       }));
     if (recorded.actionId !== actionId || recorded.status !== request.status) {
       throw new DomainError(
@@ -259,7 +262,10 @@ export class IntakeService {
         409,
       );
     }
-    if (action.status === request.status) return action;
+    if (action.status === request.status) {
+      await this.refreshDerivedInsights(intake);
+      return action;
+    }
 
     const updated = actionCardSchema.parse({
       ...action,
@@ -270,16 +276,31 @@ export class IntakeService {
     actions[actionIndex] = updated;
     const nextIntake = { ...intake, actions, updatedAt: updated.updatedAt };
     await this.store.replace(nextIntake);
-    await this.store.setInsights(
-      intake.id,
-      deriveInsights(intake.id, actions, { createId: randomUUID, now: () => new Date() }),
-    );
+    await this.refreshDerivedInsights(nextIntake);
     return updated;
   }
 
   async getInsights(intakeId: string) {
     await this.get(intakeId);
     return this.store.getInsights(intakeId);
+  }
+
+  private async refreshDerivedInsights(intake: Intake): Promise<void> {
+    const [relatedIntakes, executions] = await Promise.all([
+      this.store.list(),
+      this.store.listExecutionObservations(intake.id),
+    ]);
+    await this.store.setInsights(
+      intake.id,
+      deriveInsights(
+        {
+          intake,
+          relatedIntakes: relatedIntakes.filter((candidate) => candidate.id !== intake.id),
+          executions,
+        },
+        { createId: randomUUID, now: () => new Date() },
+      ),
+    );
   }
 
   async processNextJob(workerId: string, staleAfterMs = this.options.jobLeaseMs): Promise<boolean> {

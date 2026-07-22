@@ -129,6 +129,7 @@ model ActionExecution {
   status          ExecutionStatus
   nativeRecordRef String?         @map("native_record_ref")
   errorMessage    String?         @map("error_message")
+  deviceContext   Json?           @map("device_context")
   createdAt       DateTime        @map("created_at") @db.Timestamptz(3)
   updatedAt       DateTime        @map("updated_at") @db.Timestamptz(3)
 
@@ -143,6 +144,7 @@ model Insight {
   intakeId  String   @map("intake_id") @db.Uuid
   actionId  String?  @map("action_id") @db.Uuid
   type      String
+  kind      String   @default("observation")
   priority  String
   title     String
   body      String

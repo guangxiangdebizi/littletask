@@ -1,5 +1,6 @@
 import * as Crypto from 'expo-crypto';
 import * as SQLite from 'expo-sqlite';
+import { executionDeviceContextSchema } from '@littletask/contracts';
 
 import {
   createLedgerEntry,
@@ -23,11 +24,22 @@ interface LedgerRow {
   state: ExecutionLedgerState;
   native_record_ref: string | null;
   error_code: string | null;
+  context_json: string;
   created_at: string;
   updated_at: string;
 }
 
 let databasePromise: ReturnType<typeof openDatabase> | null = null;
+
+function parseDeviceContext(value: string) {
+  try {
+    const parsed = executionDeviceContextSchema.safeParse(JSON.parse(value || '{}'));
+    if (parsed.success) return parsed.data;
+  } catch {
+    // Fall through to the privacy-preserving empty summary for legacy/corrupt rows.
+  }
+  return { possibleDuplicateContactCount: 0, calendarConflictCount: 0 };
+}
 
 function fromRow(row: LedgerRow): ExecutionLedgerEntry {
   return {
@@ -39,6 +51,7 @@ function fromRow(row: LedgerRow): ExecutionLedgerEntry {
     state: row.state,
     nativeRecordRef: row.native_record_ref,
     errorCode: row.error_code,
+    deviceContext: parseDeviceContext(row.context_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -57,11 +70,20 @@ async function openDatabase() {
       state TEXT NOT NULL,
       native_record_ref TEXT,
       error_code TEXT,
+      context_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (action_id, revision)
     );
   `);
+  const columns = await database.getAllAsync<{ name: string }>(
+    'PRAGMA table_info(action_execution_ledger)',
+  );
+  if (!columns.some((column) => column.name === 'context_json')) {
+    await database.execAsync(
+      "ALTER TABLE action_execution_ledger ADD COLUMN context_json TEXT NOT NULL DEFAULT '{}'",
+    );
+  }
   return database;
 }
 
@@ -89,8 +111,8 @@ export const executionLedger: ExecutionLedger = {
       await transaction.runAsync(
         `INSERT OR IGNORE INTO action_execution_ledger (
           action_id, revision, action_type, confirmation_key, execution_key, state,
-          native_record_ref, error_code, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          native_record_ref, error_code, context_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         proposed.actionId,
         proposed.revision,
         proposed.actionType,
@@ -99,6 +121,7 @@ export const executionLedger: ExecutionLedger = {
         proposed.state,
         proposed.nativeRecordRef,
         proposed.errorCode,
+        JSON.stringify(proposed.deviceContext),
         proposed.createdAt,
         proposed.updatedAt,
       );
@@ -179,6 +202,31 @@ export const executionLedger: ExecutionLedger = {
       result = row ? fromRow(row) : null;
     });
     if (!result) throw new Error('Could not rotate action execution attempt');
+    return result;
+  },
+
+  async setDeviceContext(entry, context) {
+    const db = await database();
+    let result: ExecutionLedgerEntry | null = null;
+    await db.withExclusiveTransactionAsync(async (transaction) => {
+      const update = await transaction.runAsync(
+        `UPDATE action_execution_ledger
+         SET context_json = ?, updated_at = ?
+         WHERE action_id = ? AND revision = ?`,
+        JSON.stringify(context),
+        new Date().toISOString(),
+        entry.actionId,
+        entry.revision,
+      );
+      if (update.changes !== 1) throw new Error('Action execution ledger entry is missing');
+      const row = await transaction.getFirstAsync<LedgerRow>(
+        'SELECT * FROM action_execution_ledger WHERE action_id = ? AND revision = ?',
+        entry.actionId,
+        entry.revision,
+      );
+      result = row ? fromRow(row) : null;
+    });
+    if (!result) throw new Error('Could not store device execution context');
     return result;
   },
 };

@@ -1,4 +1,4 @@
-import type { AnalysisDraft, Insight, Intake } from '@littletask/contracts';
+import type { AnalysisDraft, ExecutionDeviceContext, Insight, Intake } from '@littletask/contracts';
 
 export interface AnalyzeInput {
   image: Buffer;
@@ -43,11 +43,20 @@ export interface ExecutionRecordInput {
   status: 'succeeded' | 'failed';
   nativeRecordRef?: string;
   errorMessage?: string;
+  deviceContext?: ExecutionDeviceContext;
 }
 
 export interface ExecutionRecord {
   actionId: string;
   status: ExecutionRecordInput['status'];
+}
+
+export interface ExecutionObservation {
+  actionId: string;
+  status: ExecutionRecordInput['status'];
+  deviceContext: ExecutionDeviceContext;
+  errorCode: string | null;
+  createdAt: string;
 }
 
 export interface IntakeStore {
@@ -62,6 +71,7 @@ export interface IntakeStore {
   getConfirmation(idempotencyKey: string): Promise<string | undefined>;
   getExecution(idempotencyKey: string): Promise<ExecutionRecord | undefined>;
   recordExecution(input: ExecutionRecordInput): Promise<ExecutionRecord>;
+  listExecutionObservations(intakeId: string): Promise<ExecutionObservation[]>;
   claimAnalysisJob(workerId: string, staleAfterMs: number): Promise<ClaimedAnalysisJob | null>;
   completeAnalysisJob(jobId: string): Promise<void>;
   rescheduleAnalysisJob(jobId: string, delayMs: number, errorCode: string): Promise<void>;

@@ -9,6 +9,7 @@ import type {
   ExecutionRecord,
   IntakeStore,
   ModelRunRecord,
+  ExecutionObservation,
 } from '../types';
 
 interface MemoryJob {
@@ -24,6 +25,15 @@ interface MemoryJob {
   lastErrorCode: string | null;
 }
 
+interface MemoryExecution extends ExecutionRecordInput {
+  createdAt: string;
+}
+
+const emptyDeviceContext = {
+  possibleDuplicateContactCount: 0,
+  calendarConflictCount: 0,
+};
+
 function cloneAnalyzeInput(input: AnalyzeInput): AnalyzeInput {
   return {
     ...input,
@@ -36,7 +46,7 @@ export class InMemoryIntakeStore implements IntakeStore {
   readonly #intakes = new Map<string, Intake>();
   readonly #insights = new Map<string, Insight[]>();
   readonly #confirmations = new Map<string, { actionId: string; revision: number }>();
-  readonly #executions = new Map<string, ExecutionRecordInput>();
+  readonly #executions = new Map<string, MemoryExecution>();
   readonly #jobs = new Map<string, MemoryJob>();
   readonly #modelRuns: ModelRunRecord[] = [];
 
@@ -117,8 +127,34 @@ export class InMemoryIntakeStore implements IntakeStore {
   async recordExecution(input: ExecutionRecordInput): Promise<ExecutionRecord> {
     const existing = this.#executions.get(input.idempotencyKey);
     if (existing) return { actionId: existing.actionId, status: existing.status };
-    this.#executions.set(input.idempotencyKey, structuredClone(input));
+    this.#executions.set(
+      input.idempotencyKey,
+      structuredClone({
+        ...input,
+        deviceContext: input.deviceContext ?? emptyDeviceContext,
+        createdAt: new Date().toISOString(),
+      }),
+    );
     return { actionId: input.actionId, status: input.status };
+  }
+
+  async listExecutionObservations(intakeId: string): Promise<ExecutionObservation[]> {
+    const actionIds = new Set(
+      this.#intakes.get(intakeId)?.actions.map((action) => action.id) ?? [],
+    );
+    return [...this.#executions.values()]
+      .filter((execution) => actionIds.has(execution.actionId))
+      .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map((execution) => ({
+        actionId: execution.actionId,
+        status: execution.status,
+        deviceContext: structuredClone(execution.deviceContext ?? emptyDeviceContext),
+        errorCode:
+          execution.errorMessage && /^[A-Z][A-Z0-9_]{1,79}$/.test(execution.errorMessage)
+            ? execution.errorMessage
+            : null,
+        createdAt: execution.createdAt,
+      }));
   }
 
   async claimAnalysisJob(

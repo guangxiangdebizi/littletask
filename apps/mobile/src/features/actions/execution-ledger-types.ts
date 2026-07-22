@@ -1,4 +1,4 @@
-import type { ActionCard } from '@littletask/contracts';
+import type { ActionCard, ExecutionDeviceContext } from '@littletask/contracts';
 import * as Crypto from 'expo-crypto';
 
 export type ExecutionLedgerState =
@@ -13,6 +13,7 @@ export interface ExecutionLedgerEntry {
   state: ExecutionLedgerState;
   nativeRecordRef: string | null;
   errorCode: string | null;
+  deviceContext: ExecutionDeviceContext;
   createdAt: string;
   updatedAt: string;
 }
@@ -27,6 +28,10 @@ export interface ExecutionLedger {
     patch?: { nativeRecordRef?: string | null; errorCode?: string | null },
   ): Promise<ExecutionLedgerEntry>;
   rotateExecution(entry: ExecutionLedgerEntry): Promise<ExecutionLedgerEntry>;
+  setDeviceContext(
+    entry: ExecutionLedgerEntry,
+    context: ExecutionDeviceContext,
+  ): Promise<ExecutionLedgerEntry>;
 }
 
 export function ledgerKey(actionId: string, revision: number): string {
@@ -44,6 +49,10 @@ export function createLedgerEntry(action: ActionCard): ExecutionLedgerEntry {
     state: 'prepared',
     nativeRecordRef: null,
     errorCode: null,
+    deviceContext: {
+      possibleDuplicateContactCount: 0,
+      calendarConflictCount: 0,
+    },
     createdAt: now,
     updatedAt: now,
   };

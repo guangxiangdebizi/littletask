@@ -1,4 +1,4 @@
-import type { ActionCard } from '@littletask/contracts';
+import type { ActionCard, ExecutionDeviceContext } from '@littletask/contracts';
 
 import type { ActionPreparation, DeviceActionAdapter } from './device-types';
 import { DeviceActionError } from './device-types';
@@ -14,6 +14,7 @@ export interface ActionExecutionGateway {
       status: 'succeeded' | 'failed';
       nativeRecordRef?: string;
       errorMessage?: string;
+      deviceContext: ExecutionDeviceContext;
     },
   ): Promise<ActionCard>;
 }
@@ -54,6 +55,14 @@ export class ActionExecutionCoordinator {
     if (entry.state === 'executing' || entry.state === 'uncertain') {
       throw new ExecutionOutcomeUnknownError(entry);
     }
+    if (preparation) {
+      entry = await this.ledger.setDeviceContext(entry, {
+        possibleDuplicateContactCount:
+          action.type === 'create_contact' ? preparation.contacts.length : 0,
+        calendarConflictCount:
+          action.type === 'create_event' ? preparation.calendarConflicts.length : 0,
+      });
+    }
     if (!preparation) {
       throw new DeviceActionError('DEVICE_PREPARATION_REQUIRED', '请先完成本次动作的设备核对。');
     }
@@ -89,6 +98,7 @@ export class ActionExecutionCoordinator {
         executionKey: failed.executionKey,
         status: 'failed',
         errorMessage: deviceError.code,
+        deviceContext: failed.deviceContext,
       });
       throw deviceError;
     }
@@ -140,6 +150,7 @@ export class ActionExecutionCoordinator {
         executionKey: entry.executionKey,
         status: 'succeeded',
         nativeRecordRef: entry.nativeRecordRef,
+        deviceContext: entry.deviceContext,
       });
     } catch {
       throw new ExecutionReportPendingError(entry);
