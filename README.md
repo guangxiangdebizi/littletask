@@ -100,6 +100,10 @@ History returns compact summaries through an opaque cursor rather than downloadi
 
 The API stores only anonymous device-token hashes, applies ownership at every store boundary, rate-limits registration/uploads/general traffic separately, and exposes bounded-label Prometheus metrics. See [docs/security-and-observability.md](./docs/security-and-observability.md).
 
+The API publishes its OpenAPI 3.1 contract at `/api/openapi.json`; component schemas are generated
+from the same Zod contracts consumed by the app. The public privacy policy is available in the app
+and at `/privacy-policy` in the Web export.
+
 The real-provider eval harness renders synthetic chat screenshots in memory, exercises the complete
 authenticated upload/worker/poll flow, and deletes its anonymous account afterward. See
 [docs/ai-evals.md](./docs/ai-evals.md).

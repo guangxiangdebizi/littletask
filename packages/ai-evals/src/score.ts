@@ -84,9 +84,21 @@ function scoreUpdatedContact(
   if (normalize(action.payload.target.displayName) !== normalize(expected.displayName)) {
     errors.push('update_target_mismatch');
   }
-  const phoneChanges = action.payload.changes.filter((change) => change.field === 'phone');
-  if (!phoneChanges.some((change) => digits(change.nextValue) === expected.phoneDigits)) {
-    errors.push('update_phone_mismatch');
+  if (expected.phoneDigits) {
+    const phoneChanges = action.payload.changes.filter((change) => change.field === 'phone');
+    if (!phoneChanges.some((change) => digits(change.nextValue) === expected.phoneDigits)) {
+      errors.push('update_phone_mismatch');
+    }
+  }
+  if (expected.email) {
+    const emailChanges = action.payload.changes.filter((change) => change.field === 'email');
+    if (
+      !emailChanges.some(
+        (change) => change.nextValue.toLowerCase() === expected.email?.toLowerCase(),
+      )
+    ) {
+      errors.push('update_email_mismatch');
+    }
   }
 }
 

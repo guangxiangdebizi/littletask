@@ -9,6 +9,7 @@ import { DomainError } from './intake-service';
 import { MetricsRegistry } from './metrics';
 import { FixedWindowRateLimiter, RateLimitError } from './rate-limiter';
 import { authRoutes } from './routes/auth';
+import { docsRoutes } from './routes/docs';
 import { healthRoutes } from './routes/health';
 import { intakeRoutes } from './routes/intakes';
 import { createIntakeService } from './runtime';
@@ -129,6 +130,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
 
   await app.register(healthRoutes, { prefix: '/api' });
+  await app.register(docsRoutes, { prefix: '/api' });
   await app.register(authRoutes, { prefix: '/api/v1' });
   await app.register(intakeRoutes, { prefix: '/api/v1' });
   return app;

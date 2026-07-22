@@ -52,6 +52,27 @@ function multipartScreenshot(): { payload: Buffer; contentType: string } {
 }
 
 describe('LittleTask API', () => {
+  it('serves an OpenAPI contract with the confirmation boundary', async () => {
+    const app = await buildApp({
+      config: loadConfig({ NODE_ENV: 'test', AI_PROVIDER: 'fake', LOG_LEVEL: 'silent' }),
+      logger: false,
+    });
+
+    const response = await app.inject({ method: 'GET', url: '/api/openapi.json' });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('application/vnd.oai.openapi+json');
+    const document = response.json<{
+      openapi: string;
+      paths: Record<string, { post?: { description?: string } }>;
+    }>();
+    expect(document.openapi).toBe('3.1.0');
+    expect(document.paths['/api/v1/actions/{id}/confirm']?.post?.description).toContain(
+      'does not mutate the device',
+    );
+
+    await app.close();
+  });
+
   it('reports readiness only while the persistence dependency is reachable', async () => {
     const store = new InMemoryIntakeStore();
     const app = await buildApp({

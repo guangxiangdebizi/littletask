@@ -35,7 +35,8 @@ corepack pnpm dlx eas-cli device:create
 corepack pnpm dlx eas-cli build --platform ios --profile development
 ```
 
-Build the TestFlight artifact only after the public API and privacy policy are live:
+Build the TestFlight artifact only after the public API and
+`https://manbaout.com/privacy-policy` are live:
 
 ```powershell
 corepack pnpm dlx eas-cli build --platform ios --profile production
@@ -64,7 +65,7 @@ each gate in a private release note. Never attach a real chat screenshot or cont
 
 ## App Store metadata
 
-Before submission, provide the real privacy policy URL, support URL, data collection answers,
+Before submission, provide `https://manbaout.com/privacy-policy`, the support URL, data collection answers,
 review notes, and screenshots in App Store Connect. The committed privacy manifest declares the
 selected screenshot, optional user content, extracted contact fields, and product interactions as
 linked app-functionality data with tracking disabled. Reconcile it against the deployed retention

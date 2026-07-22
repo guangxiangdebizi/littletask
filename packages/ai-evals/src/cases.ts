@@ -22,7 +22,8 @@ export interface EvalExpectation {
   };
   updateContact?: {
     displayName: string;
-    phoneDigits: string;
+    phoneDigits?: string;
+    email?: string;
   };
 }
 
@@ -33,6 +34,11 @@ export interface EvalCase {
   now: string;
   note: string;
   messages: SyntheticMessage[];
+  visual?: {
+    theme?: 'light' | 'dark';
+    fontSize?: 'normal' | 'small';
+    blurSigma?: number;
+  };
   expected: EvalExpectation;
 }
 
@@ -53,6 +59,46 @@ export const evalCases: EvalCase[] = [
       meeting: {
         startAt: '2026-07-24T15:00:00+08:00',
         locationIncludes: '科创中心',
+      },
+    },
+  },
+  {
+    id: 'zh-relative-meeting',
+    locale: 'zh-CN',
+    timezone: 'Asia/Shanghai',
+    now: '2026-07-22T10:00:00+08:00',
+    note: '',
+    messages: [
+      { sender: '周宁', side: 'incoming', text: '后天下午三点在虹桥办公室开会，一小时。' },
+      { sender: '我', side: 'outgoing', text: '可以，我会准时到。' },
+    ],
+    expected: {
+      requiredActionTypes: ['create_event'],
+      meeting: {
+        startAt: '2026-07-24T15:00:00+08:00',
+        locationIncludes: '虹桥办公室',
+      },
+    },
+  },
+  {
+    id: 'zh-cross-timezone-meeting',
+    locale: 'zh-CN',
+    timezone: 'Asia/Shanghai',
+    now: '2026-07-22T10:00:00+08:00',
+    note: '我在上海，对方在伦敦。',
+    messages: [
+      {
+        sender: 'Alice',
+        side: 'incoming',
+        text: '约 2026 年 7 月 27 日伦敦时间上午 9:30 在 Google Meet 开 45 分钟。',
+      },
+      { sender: '我', side: 'outgoing', text: 'Confirmed, see you online.' },
+    ],
+    expected: {
+      requiredActionTypes: ['create_event'],
+      meeting: {
+        startAt: '2026-07-27T09:30:00+01:00',
+        locationIncludes: 'Google Meet',
       },
     },
   },
@@ -97,6 +143,76 @@ export const evalCases: EvalCase[] = [
     },
   },
   {
+    id: 'zh-update-contact-email',
+    locale: 'zh-CN',
+    timezone: 'Asia/Shanghai',
+    now: '2026-07-22T10:00:00+08:00',
+    note: '',
+    messages: [
+      {
+        sender: '顾言',
+        side: 'incoming',
+        text: '请把通讯录里顾言的邮箱改成 guyan.new@example.com，旧邮箱不用了。',
+      },
+    ],
+    expected: {
+      requiredActionTypes: ['update_contact'],
+      forbiddenActionTypes: ['create_event', 'create_contact'],
+      updateContact: { displayName: '顾言', email: 'guyan.new@example.com' },
+    },
+  },
+  {
+    id: 'zh-same-name-update',
+    locale: 'zh-CN',
+    timezone: 'Asia/Shanghai',
+    now: '2026-07-22T10:00:00+08:00',
+    note: '通讯录里有两个都叫张伟的人，截图无法确定是哪一个。',
+    messages: [
+      {
+        sender: '张伟',
+        side: 'incoming',
+        text: '我的新号码是 135 0000 3333，帮我更新一下。',
+      },
+    ],
+    expected: {
+      requiredActionTypes: ['update_contact'],
+      requiresUncertaintySignal: true,
+      updateContact: { displayName: '张伟', phoneDigits: '13500003333' },
+    },
+  },
+  {
+    id: 'zh-multiple-actions',
+    locale: 'zh-CN',
+    timezone: 'Asia/Shanghai',
+    now: '2026-07-22T10:00:00+08:00',
+    note: '',
+    messages: [
+      {
+        sender: '沈清',
+        side: 'incoming',
+        text: '我是沈清，电话 138 0000 4444，邮箱 shenqing@example.com，先存一下。',
+      },
+      {
+        sender: '沈清',
+        side: 'incoming',
+        text: '再约 2026 年 7 月 28 日上午 10 点在 A3 会议室聊 30 分钟。',
+      },
+      { sender: '我', side: 'outgoing', text: '收到。' },
+    ],
+    expected: {
+      requiredActionTypes: ['create_contact', 'create_event'],
+      meeting: {
+        startAt: '2026-07-28T10:00:00+08:00',
+        locationIncludes: 'A3',
+      },
+      createContact: {
+        displayName: '沈清',
+        phoneDigits: '13800004444',
+        email: 'shenqing@example.com',
+      },
+    },
+  },
+  {
     id: 'en-explicit-meeting',
     locale: 'en-US',
     timezone: 'America/Los_Angeles',
@@ -116,6 +232,29 @@ export const evalCases: EvalCase[] = [
       meeting: {
         startAt: '2026-07-25T14:00:00-07:00',
         locationIncludes: 'North Gate',
+      },
+    },
+  },
+  {
+    id: 'mixed-dark-small-meeting',
+    locale: 'zh-CN',
+    timezone: 'Asia/Shanghai',
+    now: '2026-07-22T10:00:00+08:00',
+    note: '',
+    visual: { theme: 'dark', fontSize: 'small', blurSigma: 0.35 },
+    messages: [
+      {
+        sender: 'Mia',
+        side: 'incoming',
+        text: '[12:03] 明晚 7:30，meet at West Lobby / 西大厅，45 mins。',
+      },
+      { sender: '我', side: 'outgoing', text: 'OK，2026 年 7 月 23 日见。' },
+    ],
+    expected: {
+      requiredActionTypes: ['create_event'],
+      meeting: {
+        startAt: '2026-07-23T19:30:00+08:00',
+        locationIncludes: '西大厅',
       },
     },
   },

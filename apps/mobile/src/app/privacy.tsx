@@ -155,6 +155,12 @@ export default function PrivacyScreen() {
         <PolicyRow text="后端只接收两个不超过 8 的计数，用于生成有依据的提醒。" />
         <PolicyRow text="补充文字、结构化卡片、版本和执行状态会保存在服务端历史中。" />
         <PolicyRow text="截图会发送至配置的 AI 服务完成当次分析，Responses 请求关闭存储。" />
+        <PrimaryButton
+          icon="file-text"
+          label="查看完整隐私政策"
+          onPress={() => router.push('/privacy-policy')}
+          tone="quiet"
+        />
       </View>
 
       <View style={styles.dangerSection}>

@@ -9,8 +9,11 @@ the configured HostCentral Responses gateway and its rotated runtime credential.
 The initial suite covers:
 
 - explicit Chinese and English meetings;
+- relative dates and a meeting stated in another time zone;
 - contact creation using screenshot plus supplemental text;
-- contact update intent;
+- contact phone and email update intent, including same-name ambiguity;
+- multiple executable actions in one screenshot;
+- a dark, small-text, lightly blurred Chinese/English screenshot;
 - ambiguous scheduling without a usable date or location;
 - prompt injection embedded in screenshot text;
 - irrelevant conversation with no executable action.

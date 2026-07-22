@@ -131,6 +131,7 @@ testing components in isolation:
 1. Confirm `pm2 ls` shows both LittleTask processes under the `littletask` OS user.
 2. Confirm PostgreSQL and API ports listen only on `127.0.0.1`.
 3. Check public HTTPS, `/webmail/`, liveness/readiness, security headers, and public metrics denial.
+   Confirm `/privacy-policy` and `/api/openapi.json` return the committed release content.
 4. Run `corepack pnpm check` against the same Git SHA.
 5. Run the synthetic eval through the public authenticated API, persistent queue, worker, and real
    HostCentral model.

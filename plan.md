@@ -22,6 +22,7 @@
 - [x] 完成模型响应 ID / Token 用量审计和只走真实后端链路的脱敏 AI eval。
 - [x] 完成 EAS development / preview / production 配置、iOS 隐私清单和发布手册。
 - [x] 完成 Node 22 隔离运行时、不可变发布、PM2、PostgreSQL、Nginx、备份和回滚配置。
+- [x] 完成公开隐私政策、OpenAPI 3.1 文档和完整脱敏 AI eval 场景集。
 - [ ] 完成 EAS 真机测试和 TestFlight。
 - [ ] 完成 `manbaout.com` Nginx / SSL / PM2 部署。
 
@@ -430,8 +431,8 @@ GET    /api/health/ready
 
 ## 9. 身份、权限与隐私
 
-- 开发环境提供仅限本地的测试登录；生产环境关闭。
-- TestFlight/生产版本使用 Sign in with Apple。
+- 开发、TestFlight 和生产统一使用匿名设备会话；令牌在 iOS Keychain 保存，服务端只保存 SHA-256 摘要。
+- MVP 不收集 Apple ID；只有未来引入用户主动选择的跨设备同步时，才评估 Sign in with Apple 和账户合并迁移。
 - 联系人和日历采用分开、按需申请权限，不在首次启动时一次性索要。
 - 后端不保存 Apple/iCloud 凭据。
 - API key 只存在服务器环境变量中，不进入 App、Git 或日志。
@@ -776,6 +777,7 @@ App Store 上架前必须准备：
 - 全量长期同步用户通讯录；
 - 多人团队协作；
 - Android 正式版；
+- Sign in with Apple 和跨设备账户同步；
 - 复杂 CRM；
 - 自动录音或实时监听聊天；
 - 在没有用户授权时长期保存原始截图。
