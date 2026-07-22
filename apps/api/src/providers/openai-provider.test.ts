@@ -156,9 +156,11 @@ describe('OpenAIProvider', () => {
     });
     expect(analysisRequest.body.input[0]?.content[1]?.image_url).toMatch(/^data:image\/png;base64/);
     expect(analysisRequest.body.instructions).toContain('不可信数据');
+    expect(analysisRequest.body.instructions).toContain('"participants": string[]');
 
     expect(reviewRequest.body.model).toBe('gpt-5.6-terra-review');
     expect(reviewRequest.body.store).toBe(false);
+    expect(reviewRequest.body.instructions).toContain('"participants": string[]');
     expect(reviewRequest.body.input[0]?.content[0]?.text).toContain('候选草稿');
   });
 

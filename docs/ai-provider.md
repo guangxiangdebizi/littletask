@@ -35,6 +35,11 @@ Both requests set:
 - `detail: original` for image input;
 - a strict Zod-backed `text.format` JSON schema.
 
+The same required field contract is also embedded in the analysis and review instructions because
+an OpenAI-compatible gateway may accept `text.format` without enforcing it. This is only a
+compatibility aid: the provider still parses the returned JSON through the model-facing Zod schema
+and then through the narrower domain schema before any Action Card can be persisted.
+
 The model-facing schema uses required nullable fields because strict Structured Outputs requires every property to be present. The provider converts those nullable values back into the narrower application contract and validates the result again before materializing Action Cards.
 
 Each provider result carries a separate minimal telemetry envelope. The service persists a bounded
@@ -64,6 +69,18 @@ Before deploying:
 5. Confirm the returned response reports the expected model and `store: false` behavior.
 6. Test Chinese, English, mixed-language, ambiguous-time, irrelevant-image, prompt-injection, and unreadable-text fixtures.
 7. Keep fake-provider use explicit and confined to test process configuration.
+
+Run the non-content-logging capability probe with the runtime key before the full eval:
+
+```powershell
+$env:OPENAI_API_KEY='<runtime-secret>'
+corepack pnpm probe:ai
+Remove-Item Env:OPENAI_API_KEY
+```
+
+The probe renders a synthetic screenshot in memory and reports only completion state, output type
+and length, JSON/schema validity, and invalid field paths. It never prints the key, prompt, image,
+model text, Action payload, or response ID.
 
 Reference behavior follows the official OpenAI [vision input](https://developers.openai.com/api/docs/guides/images-vision) and [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) contracts. The configured gateway remains subject to an explicit compatibility smoke test.
 
