@@ -164,7 +164,7 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 34,
     fontWeight: '800',
-    letterSpacing: -1.2,
+    letterSpacing: 0,
     lineHeight: 40,
     maxWidth: 620,
   },

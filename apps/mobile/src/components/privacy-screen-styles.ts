@@ -12,7 +12,7 @@ export const privacyScreenStyles = StyleSheet.create({
     color: colors.ink,
     fontSize: 30,
     fontWeight: '800',
-    letterSpacing: -0.8,
+    letterSpacing: 0,
   },
   subtitle: {
     color: colors.muted,

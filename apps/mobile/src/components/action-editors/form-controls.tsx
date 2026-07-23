@@ -97,7 +97,7 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 12,
     fontWeight: '700',
-    letterSpacing: 0.5,
+    letterSpacing: 0,
   },
   readonlyRow: {
     borderBottomColor: colors.line,

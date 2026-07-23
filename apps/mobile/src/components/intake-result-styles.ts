@@ -14,7 +14,7 @@ export const intakeResultStyles = StyleSheet.create({
     color: colors.ink,
     fontSize: 26,
     fontWeight: '700',
-    letterSpacing: -0.7,
+    letterSpacing: 0,
     lineHeight: 34,
   },
   summaryMeta: {
@@ -58,7 +58,7 @@ export const intakeResultStyles = StyleSheet.create({
     color: colors.ink,
     fontSize: 20,
     fontWeight: '700',
-    letterSpacing: -0.3,
+    letterSpacing: 0,
   },
   sectionHint: { color: colors.faint, fontSize: 12 },
   emptyState: {

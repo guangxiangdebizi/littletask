@@ -48,6 +48,6 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 19,
     fontWeight: '700',
-    letterSpacing: -0.4,
+    letterSpacing: 0,
   },
 });

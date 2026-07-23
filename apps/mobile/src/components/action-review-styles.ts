@@ -34,7 +34,7 @@ export const actionReviewStyles = StyleSheet.create({
     color: colors.ink,
     fontSize: 24,
     fontWeight: '800',
-    letterSpacing: -0.5,
+    letterSpacing: 0,
   },
   revision: {
     color: colors.muted,
