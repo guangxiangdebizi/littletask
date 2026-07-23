@@ -1,6 +1,6 @@
 # LittleTask 产品与交付计划
 
-> 状态：核心产品链路与 `manbaout.com` 云端环境已上线；正在完成真实 API 质量验收和 iOS Beta
+> 状态：核心产品链路、真实 AI、视觉验收与 `manbaout.com` 云端环境已完成；iOS Beta 等待账号侧初始化
 > 产品形态：iOS App；Web 仅作为本地/云端测试与演示入口
 > 核心链路：聊天截图 + 补充文字 -> 上下文理解 -> Action Cards -> 用户确认 -> 系统执行 -> 洞察与建议
 > AI 决策：通过 `https://api.hostcentral.cc` 的 OpenAI-compatible Responses API 接入 GPT-5.6 Terra
@@ -13,7 +13,7 @@
 - [x] 完成 Fastify API、上传校验、确认门禁、幂等执行接口和历史接口。
 - [x] 接入 PostgreSQL / Prisma 持久化、可恢复异步任务队列和独立 PM2 worker。
 - [x] 实现 GPT-5.6 Terra 多模态 LangGraph ReAct agent、独立 action workspace、复核和安全错误边界。
-- [ ] 使用 Git 忽略的私有截图完成公网真实 API 质量验收。
+- [x] 使用 Git 忽略的私有截图完成公网真实 API 质量验收。
 - [x] 接入 iOS Contacts / Calendar 原生执行、本地冲突/重复项检查和 SQLite 执行账本。
 - [x] 完成基于已确认动作、设备核对计数和应用历史的可追溯确定性洞察。
 - [x] 完成结构化历史分页、活动来源、完整级联删除和隐私数据控制。
@@ -23,16 +23,23 @@
 - [x] 完成 EAS development / preview / production 配置、iOS 隐私清单和发布手册。
 - [x] 完成 Node 22 隔离运行时、不可变发布、PM2、PostgreSQL、Nginx、备份和回滚配置。
 - [x] 完成公开隐私政策和 OpenAPI 3.1 文档。
+- [x] 完成生产 Web 的桌面、平板和手机视觉验收及图标字体修复。
 - [ ] 完成 EAS 真机测试和 TestFlight。
 - [x] 完成 `manbaout.com` Nginx / SSL / PM2 / PostgreSQL 部署和备份恢复演练。
 
-2026-07-22 已将 Git SHA `9f97dbdc6e91bbbb80aec26864f25be6758f8cfc` 部署到
+2026-07-23 已将 Git SHA `1463420f6c28b863f7e12c5aa6fd3a558e89e750` 部署到
 `https://manbaout.com`。LittleTask 使用隔离的 Node 22、低权限 API/worker、仅回环监听的
 PostgreSQL 17 和现有有效证书；原 Roundcube Webmail 保留在 `/webmail/`。公网 readiness
 返回真实 `openai` provider，OpenAPI 和隐私政策已发布，公网指标端点被拒绝。每日备份 timer
 已启用，首份备份已在隔离 PostgreSQL 容器中以 4 个迁移和一致行数完成恢复演练。
 
+生产 Web 已使用 Chromium CDP 在 `1440x900`、`768x1024` 和 `390x844` 三档视口验收：页面宽度与视口一致，无浏览器异常，按钮保留可访问名称；`LittleTask` 页面标题、Feather `@font-face`、字体预加载和图标渲染均生效。`manbaout.com` 与 `www.manbaout.com` 的 TLS 校验结果为 0，后者以 301 跳转主域名；公网和回环 readiness 均返回 `ready/openai`，PM2 API/worker 运行于上述 release 且无重启。
+
 当前原生执行模块已完成代码和自动化验证：三类卡片可编辑并绑定 revision；权限只在用户主动设备核对时请求；联系人消歧、日历冲突、最终确认、SQLite 防重复账本、失败重试和不确定结果恢复已接通；Web 只能查看和编辑卡片，执行路径会被明确阻止；iOS JavaScript bundle 已通过。尚未把“真机写入”标记为验收通过，需在 EAS/TestFlight 构建后用专用联系人和日历回归。
+
+EAS 的 development、preview、production 和 simulator profiles、bundle identifier、权限文案、隐私清单及发布手册均已就绪。当前机器没有 Expo/EAS 登录态、`EXPO_TOKEN`、EAS project ID 或 Apple Developer 签名身份，因此不能代表项目所有者创建云端 iOS artifact 或 TestFlight 记录；完成账号登录和 `eas init` 后，按 `docs/ios-release.md` 的非模拟真机门禁继续，该项在拿到真实 build URL 和真机记录前保持未完成。
+
+私有截图已通过公网真实链路验收：客户端创建匿名设备会话并上传截图，PostgreSQL worker 依次完成 LangGraph analysis 与 review，约 63 秒后返回 `ready`；结果包含 1 张未确认的 `create_event` Action Card、4 条证据、4 个不确定项和 2 个澄清问题。动作类型白名单、证据必填和未确认状态均通过确定性校验，验收结束后账户及截图任务已级联删除。截图和内容未写入 Git、日志或验收输出。
 
 当前洞察模块已完成：确认或执行结果变化后会重新计算规则事实与建议；日历冲突、潜在重复联系人、执行失败、缺失字段和相关应用历史均带结构化依据。最终确认时，iOS 只提交与当前卡片匹配的最多 8 条联系人摘要（姓名、公司、职位、是否已有电话/邮箱），不上传整本通讯录和具体号码。动作成功后，独立持久化队列把服务端编号后的证据注册表交给 insight workspace，ReAct agent 只能调用一次 `submit_insight_workspace`；未知 action/evidence ID 会在持久化前再次被拒绝。
 
