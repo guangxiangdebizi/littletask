@@ -1,0 +1,4 @@
+services:
+  webmail:
+    environment:
+      ROUNDCUBEMAIL_REQUEST_PATH: /webmail/
